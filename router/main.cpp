@@ -11,6 +11,7 @@
 //   GET  /events                SSE: node state + job completions (UI)
 //   GET  /admin/stats           ledger, counters, active policy
 //   POST /admin/policy          runtime policy switch (§5)
+//   POST /admin/cost_model      runtime cost-model switch
 //   GET  /health                liveness, no auth
 
 #include <algorithm>
@@ -61,7 +62,9 @@ void usage() {
         "  --nodes PATH               nodes.json (default: nodes.json)\n"
         "  --node.token SECRET        bearer token presented to agents\n"
         "  --trace PATH               trace file (default: trace.jsonl)\n"
-        "  --policy NAME              roundrobin-v1 (default)\n"
+        "  --policy NAME              roundrobin-v1 (default) | warmth-v1\n"
+        "  --cost_model NAME          static-v1 (default) | learned-v1\n"
+        "  --replay_from PATH         learn from this trace on start\n"
         "  --poll_ms N                node poll interval (default 1000)\n"
         "  --request_timeout_ms N     default 600000 (a cold load can be minutes)\n"
         "  --scoring.evict_weight F   default 0.5\n"
@@ -365,6 +368,42 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    const std::string wanted_cost = cfg.get_str("cost_model", "static-v1");
+    if (!state.set_cost_model(wanted_cost)) {
+        std::fprintf(stderr, "unknown cost model '%s' (static-v1|learned-v1)\n",
+                     wanted_cost.c_str());
+        return 2;
+    }
+
+    // §4.2: "The router holds all state in memory and rebuilds it from the
+    // trace log on start." A learned model that forgot everything on restart
+    // would spend its first hundred requests re-deriving what is already on
+    // disk, and a restart mid-benchmark would quietly change the thing being
+    // measured. The ledger is deliberately NOT replayed: it accounts for
+    // requests in flight *now*, and nothing from a previous process is.
+    // Learning history, separate from the file being written. Without this the
+    // only way to give a learned model a past is to append to the very file the
+    // run is being measured on, which contaminates the measurement with its own
+    // warm-up. Defaults to the trace, which is the right thing for a restart.
+    const std::string replay_path = cfg.get_str("replay_from", trace_path);
+    if (cfg.get_bool("replay_trace", true)) {
+        rf::TraceReadStats stats;
+        std::string read_err;
+        const int64_t started = rf::mono_ms();
+        if (rf::read_trace(replay_path,
+                           [&state](const rf::TraceRecord& r) { state.replay(r); },
+                           &stats, &read_err)) {
+            if (stats.parsed > 0)
+                RF_INFO("replayed %llu record(s) from %s into %s in %lld ms",
+                        static_cast<unsigned long long>(stats.parsed),
+                        replay_path.c_str(), state.cost_model_name().c_str(),
+                        static_cast<long long>(rf::mono_ms() - started));
+        } else {
+            // A missing trace on first start is the normal case, not an error.
+            RF_DEBUG("no trace to replay: %s", read_err.c_str());
+        }
+    }
+
     rf::Dispatcher dispatcher(state, registry, trace, node_token, request_timeout_ms);
 
     registry.start(node_token, poll_ms, node_timeout_ms);
@@ -533,6 +572,23 @@ int main(int argc, char** argv) {
             res.send_json(200, j.dump(2));
             return;
         }
+        if (req.method == "POST" && req.path == "/admin/cost_model") {
+            rf::Json body;
+            std::string perr;
+            if (!rf::Json::parse(req.body, body, &perr)) {
+                res.send_error(400, "invalid_request_error", "bad JSON: " + perr);
+                return;
+            }
+            const std::string name = body["cost_model"].as_str();
+            if (!state.set_cost_model(name)) {
+                res.send_error(400, "unknown_cost_model",
+                               "no cost model named '" + name + "'");
+                return;
+            }
+            res.send_json(200, "{\"cost_model\":\"" + state.cost_model_name() + "\"}");
+            return;
+        }
+
         if (req.method == "POST" && req.path == "/admin/policy") {
             rf::Json body;
             std::string perr;

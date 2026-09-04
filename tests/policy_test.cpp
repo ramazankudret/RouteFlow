@@ -443,6 +443,159 @@ void test_round_robin_is_a_baseline() {
           "the baseline still records full predictions, so error is comparable");
 }
 
+
+// --- the learned cost model (Phase 2) ---------------------------------------
+
+namespace {
+
+// A completed job, shaped so the learned model can take it apart. The numbers
+// are chosen so the intended rate is exact arithmetic, not something to eyeball.
+rf::TraceRecord make_record(const std::string& node, const std::string& model,
+                            bool warm, uint32_t prompt, uint32_t output,
+                            double prefill_ms, double decode_ms,
+                            uint32_t decoders, double load_ms = 0) {
+    rf::TraceRecord r;
+    r.job_id = rf::ulid();
+    r.node_id = node;
+    r.model = model;
+    r.outcome = rf::Outcome::Ok;
+    r.was_resident = warm;
+    r.footprint_bytes = 7ULL * 1000 * 1000 * 1000;
+    r.has_prompt_tokens_actual = true;
+    r.prompt_tokens_actual = prompt;
+    r.has_output_tokens = true;
+    r.output_tokens = output;
+    r.queue_wait_ms = 0;
+    r.has_load_ms = warm || load_ms > 0;
+    r.load_ms = warm ? 0 : load_ms;
+    r.has_ttft = true;
+    r.ttft_ms = r.load_ms + prefill_ms;
+    r.total_ms = r.ttft_ms + decode_ms;
+    r.inflight_at_dispatch = 0;
+    r.concurrent_decoders_at_dispatch = decoders;
+    return r;
+}
+
+}  // namespace
+
+void test_learned_cost_model() {
+    section("learned cost model (§8, Phase 2)");
+
+    const rf::ScoringConfig scoring = bench_scoring();
+    const auto cluster = make_cluster();
+    const rf::NodeState& jetson = cluster[1];   // holds planner:12b warm
+    rf::EmptyLedger ledger;
+    const rf::EvictionPlan none;
+    const auto req = planner_request(140);
+
+    auto learned = rf::make_learned_cost_model(scoring);
+    auto static_model = rf::make_static_cost_model(scoring);
+
+    // Before any evidence the two must agree: §9 seeds the learned model from
+    // the static table, so a fresh cluster is not worse off for using it.
+    const rf::Estimate cold_start =
+        learned->estimate(req, jetson, ledger, none, rf::now_ms());
+    const rf::Estimate seeded =
+        static_model->estimate(req, jetson, ledger, none, rf::now_ms());
+    check(std::fabs(cold_start.total_ms() - seeded.total_ms()) < 1e-6,
+          "with no observations the learned model matches its seed exactly");
+    check(cold_start.conf == rf::Confidence::Seeded, "and reports itself as seeded");
+
+    // Feed uncontended warm jobs whose real decode rate is 0.100 tok/ms — far
+    // from the ~0.0129 the seed table predicts for this node and model.
+    for (int i = 0; i < 30; ++i) {
+        learned->observe(make_record("sim-jetson", "planner:12b", true,
+                                     1200, 200, /*prefill_ms=*/400,
+                                     /*decode_ms=*/2000, /*decoders=*/1));
+    }
+    const rf::Estimate taught =
+        learned->estimate(req, jetson, ledger, none, rf::now_ms());
+    check(taught.t_decode_ms < seeded.t_decode_ms * 0.5,
+          "a measured decode rate replaces the seed");
+    // 140 tokens at 0.100 tok/ms is 1400 ms.
+    check(std::fabs(taught.t_decode_ms - 1400.0) < 60.0,
+          "and lands on the observed rate, not somewhere between");
+    check(taught.conf == rf::Confidence::Converged,
+          "30 samples is reported as converged");
+
+    // 1200 prompt tokens in 400 ms is 3.0 tok/ms.
+    check(std::fabs(taught.t_prefill_ms - 400.0) < 20.0,
+          "prefill is learned from the same warm records");
+
+    // Contended records must not move the base rate — that is D5's whole point.
+    const double before_contended = taught.t_decode_ms;
+    for (int i = 0; i < 20; ++i) {
+        // Two decoders, and the run really was half speed: alpha = 1.
+        learned->observe(make_record("sim-jetson", "planner:12b", true,
+                                     1200, 200, 400, 4000, /*decoders=*/2));
+    }
+    const rf::Estimate after_contended =
+        learned->estimate(req, jetson, ledger, none, rf::now_ms());
+    check(std::fabs(after_contended.t_decode_ms - before_contended) < 1.0,
+          "contended jobs do not corrupt the uncontended decode rate (D5)");
+
+    // They teach alpha instead, which shows up only when something else is
+    // decoding on that node.
+    struct OneDecoder : rf::EmptyLedger {
+        uint32_t concurrent_decoders(const std::string&) const override { return 1; }
+    } busy;
+    const rf::Estimate contended =
+        learned->estimate(req, jetson, busy, none, rf::now_ms());
+    check(contended.t_decode_ms > after_contended.t_decode_ms * 1.8,
+          "a second decoder roughly halves throughput, as the records showed");
+
+    // Load bandwidth comes from cold starts. The record must carry the same
+    // footprint the estimator will divide by, or the two disagree by the safety
+    // margin and the KV term and the arithmetic stops being checkable.
+    const rf::NodeState& desktop = cluster[0];   // nothing resident
+    const uint64_t desktop_footprint =
+        learned->footprint_bytes("planner:12b", desktop, req.num_ctx);
+    const rf::Estimate before_load =
+        learned->estimate(req, desktop, ledger, none, rf::now_ms());
+    for (int i = 0; i < 10; ++i) {
+        rf::TraceRecord cold = make_record("sim-desktop", "planner:12b", false,
+                                           1200, 200, 400, 2000, 1,
+                                           /*load_ms=*/7000);
+        cold.footprint_bytes = desktop_footprint;
+        learned->observe(cold);
+    }
+    const rf::Estimate after_load =
+        learned->estimate(req, desktop, ledger, none, rf::now_ms());
+    check(std::fabs(after_load.t_load_ms - 7000.0) < 400.0,
+          "load bandwidth is learned from footprint over measured load time");
+    check(after_load.sigma_ms < before_load.sigma_ms,
+          "and the cold candidate stops carrying a band it did not earn (D8)");
+
+    // Output length: with no cap from the caller, the model should predict what
+    // it has seen rather than the blind seed, and its sigma should be the
+    // measured error rather than a guessed fraction (§8).
+    rf::RequestFeatures uncapped = req;
+    uncapped.predicted_output_tokens = 0;
+    uncapped.predicted_output_sigma = 0;
+    const rf::OutputPrediction blind = static_model->predict_output(uncapped);
+    const rf::OutputPrediction informed = learned->predict_output(uncapped);
+    check(informed.tokens != blind.tokens, "output length is learned, not seeded");
+    check(std::abs(static_cast<int>(informed.tokens) - 200) < 25,
+          "and matches the lengths actually generated");
+    check(informed.sigma < blind.sigma,
+          "with a narrower band than the blind prior, which is what turns "
+          "within_noise decisions into real ones");
+    check(informed.sigma > 0,
+          "but never zero — a perfect run does not make the next one certain");
+
+    // A failed job describes a broken transfer, not a node's speed.
+    auto fresh = rf::make_learned_cost_model(scoring);
+    for (int i = 0; i < 30; ++i) {
+        rf::TraceRecord bad = make_record("sim-jetson", "planner:12b", true,
+                                          1200, 200, 400, 2000, 1);
+        bad.outcome = rf::Outcome::StreamFailed;
+        fresh->observe(bad);
+    }
+    const rf::Estimate unlearned =
+        fresh->estimate(req, jetson, ledger, none, rf::now_ms());
+    check(std::fabs(unlearned.total_ms() - seeded.total_ms()) < 1e-6,
+          "failed jobs teach nothing");
+}
 }  // namespace
 
 int main() {
@@ -454,6 +607,7 @@ int main() {
     test_queue_and_contention();
     test_uncertainty_and_omission();
     test_round_robin_is_a_baseline();
+    test_learned_cost_model();
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

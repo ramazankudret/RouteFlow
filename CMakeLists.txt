@@ -54,7 +54,9 @@ add_library(rf_router STATIC
   router/core/registry.cpp
   router/core/router_state.cpp
   router/core/trace_writer.cpp
+  router/cost/seeds.cpp
   router/cost/static_cost_model.cpp
+  router/cost/learned_cost_model.cpp
   router/policy/candidates.cpp
   router/policy/round_robin.cpp
   router/policy/warmth.cpp

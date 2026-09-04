@@ -161,6 +161,24 @@ def main():
     print(f"  {label:<26}{base_spread:>14}{test_spread:>14}")
     print(f"  {'  runs':<26}{base['runs']:>14}{test['runs']:>14}")
 
+    # Min-max ranges are the wrong summary for two small samples: a single
+    # touching pair reads as "overlapping" even when every other comparison
+    # goes one way. Counting the pairings is what the medians are actually
+    # claiming, and it is the statistic a rank test is built on.
+    pairs = [(a, b) for a in test['walls'] for b in base['walls']]
+    wins = sum(1 for a, b in pairs if a < b)
+    if pairs:
+        n = len(pairs)
+        print(f"  {'  pairwise wins':<26}{'':>14}{f'{wins}/{n}':>14}")
+        # Exact Mann-Whitney thresholds for equal group sizes, two-tailed 0.05.
+        critical = {4: 15, 5: 23, 6: 32, 7: 42, 8: 54}
+        k = min(base['runs'], test['runs'])
+        if k in critical and base['runs'] == test['runs']:
+            verdict = ("outside run-to-run variance (p < 0.05)"
+                       if wins >= critical[k] or wins <= n - critical[k]
+                       else "NOT distinguishable from run-to-run variance")
+            print(f"  {'':<26}{'':>14}{'':>14}  {verdict}")
+
     print("\n  REPORTED — can move against wall-clock; not decisive")
     row("total p50 (ms)", percentile(base["total"], 0.5), percentile(test["total"], 0.5))
     row("total p95 (ms)", percentile(base["total"], 0.95),

@@ -265,6 +265,8 @@ Json TraceRecord::to_json() const {
     j["cost_model"] = Json(cost_model);
     j["node_id"] = Json(node_id);
     j["was_resident"] = Json(was_resident);
+    j["footprint_bytes"] = maybe_num(footprint_bytes > 0,
+                                     static_cast<double>(footprint_bytes));
 
     j["prompt_tokens_est"] = Json(prompt_tokens_est);
     j["prompt_tokens_actual"] = maybe_num(has_prompt_tokens_actual, prompt_tokens_actual);
@@ -331,6 +333,7 @@ bool TraceRecord::from_json(const Json& j, TraceRecord& out, std::string* err) {
     out.cost_model = j["cost_model"].as_str();
     out.node_id = j["node_id"].as_str();
     out.was_resident = j["was_resident"].as_bool();
+    out.footprint_bytes = j["footprint_bytes"].as_u64(0);
 
     out.prompt_tokens_est = j["prompt_tokens_est"].as_u32();
     out.has_prompt_tokens_actual = j["prompt_tokens_actual"].is_num();

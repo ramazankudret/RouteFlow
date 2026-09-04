@@ -298,6 +298,7 @@ void Dispatcher::handle(const http::Request& client_req, http::Responder& res) {
         rec.cost_model = r.cost_model_name;
         rec.node_id = r.node_id;
         rec.was_resident = r.was_resident;
+        rec.footprint_bytes = r.footprint_bytes;
 
         rec.prompt_tokens_est = in.features.prompt_tokens;
         rec.has_prompt_tokens_actual = a.has_prompt_tokens;

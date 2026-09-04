@@ -63,6 +63,7 @@ between router and node stays debuggable.
 | `cost_model` | string | Active cost model name, e.g. `static-v1`. |
 | `node_id` | string | Winner. Empty string if `outcome == no_candidate`. |
 | `was_resident` | bool | Model was in the winner's VRAM at decision time. |
+| `footprint_bytes` | int \| null | VRAM the model was expected to need on this node. Added in Phase 2: `load_bandwidth = footprint_bytes / load_ms` is not derivable from any other field, so without it load bandwidth cannot be learned at all. `null` on records written before it existed. |
 | `decided_by` | string | Term with the largest gap to the runner-up, or `within_noise` (D8), or `single_candidate`. |
 | `margin_ms` | number \| null | Winner vs runner-up predicted total. `null` with one candidate. |
 | `evicted` | array of string | Models evicted to make room. Usually empty. |
@@ -140,8 +141,7 @@ decode_rate(node, model)  = output_tokens / t_decode_actual
       Contended records instead solve for alpha(node):
           alpha = (base_rate / observed_rate - 1) / (concurrent_decoders - 1)
 
-load_bandwidth(node)      = footprint_observed / load_ms
-footprint_observed        = vram_free_before - vram_free_after   (cold loads only)
+load_bandwidth(node)      = footprint_bytes / load_ms
 ```
 
 **Recovering load time when the engine does not report it.** `load_ms` is null
@@ -197,3 +197,4 @@ once as latency (the successful attempt) and separately as a failure event.
 | `v` | Date | Change |
 | --- | --- | --- |
 | 1 | 2026-09-03 | Initial contract. Supersedes the unversioned rev 1 sketch, which lacked `v`, split timestamps, an `outcome` enum, ledger counters and per-candidate loser state. |
+| 1 | 2026-09-05 | Added `footprint_bytes`. A field may be added without a version bump (rule 2); readers that do not know it are unaffected, and readers that do treat its absence as "unknown". Phase 2 needs it to learn load bandwidth. |

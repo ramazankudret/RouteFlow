@@ -116,6 +116,24 @@ void RouterState::complete(NodeLedger::Token token, const TraceRecord& record) {
     if (record.outcome == Outcome::Ok) cost_->observe(record);
 }
 
+bool RouterState::set_cost_model(const std::string& name) {
+    std::unique_ptr<ICostModel> next;
+    if (name == "static-v1" || name == "static") next = make_static_cost_model(scoring_);
+    else if (name == "learned-v1" || name == "learned")
+        next = make_learned_cost_model(scoring_);
+    if (!next) return false;
+
+    std::unique_lock<std::shared_mutex> lock(mu_);
+    RF_INFO("cost model switched: %s -> %s", cost_->name(), next->name());
+    cost_ = std::move(next);
+    return true;
+}
+
+void RouterState::replay(const TraceRecord& record) {
+    std::unique_lock<std::shared_mutex> lock(mu_);
+    cost_->observe(record);
+}
+
 bool RouterState::set_policy(const std::string& name) {
     std::unique_ptr<IPolicy> next;
     if (name == "roundrobin-v1" || name == "roundrobin" || name == "round_robin")

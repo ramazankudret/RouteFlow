@@ -83,6 +83,13 @@ public:
     // Exclusive. Runtime policy switching (§5). Returns false for an unknown
     // name, leaving the active policy untouched.
     bool set_policy(const std::string& name);
+    // Exclusive. Same contract as set_policy: unknown name leaves the active
+    // model untouched and returns false.
+    bool set_cost_model(const std::string& name);
+
+    // Exclusive. Feeds one historical record to the cost model without
+    // touching the ledger — §4.2's "rebuilds it from the trace log on start".
+    void replay(const TraceRecord& record);
     std::string policy_name() const;
     std::string cost_model_name() const;
 

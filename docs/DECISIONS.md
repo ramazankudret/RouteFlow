@@ -423,3 +423,49 @@ What remains true from the original entry: the OpenAI-compatible path reports no
 load duration, engine-reported values are better than derived ones, and Phase 2
 should weight them accordingly. What was wrong: that this stopped Phase 2 from
 starting. It does not. Phase 2 is unblocked.
+
+### D23 — `footprint_bytes` added to the trace · Settled
+
+Phase 2 learns load bandwidth as `footprint / load_ms`. A v1 record carried
+`load_ms` but nothing to divide it by: the footprint the router used at
+admission appeared nowhere, and no combination of the other fields reconstructs
+it — `vram_free_at_dispatch` is the node's free memory, not the model's size,
+and the candidate entries carry scheduling state rather than hardware.
+
+So `footprint_bytes` is recorded. Rule 2 permits adding a field without a
+version bump: readers that do not know it are unaffected, and readers that do
+treat its absence as unknown rather than as zero.
+
+The alternative was to have the learned model remember the footprints it
+computed during `estimate()` and look them up in `observe()`. That was written
+first and thrown away: `estimate` is `const` and runs under a shared lock, so a
+cache written there is a data race, and a value that exists only in memory is
+lost on restart — which is exactly when the trace replay is supposed to bring
+the model back.
+
+### D24 — What Phase 2 cannot learn, and says so · Settled
+
+`LearnedCostModel::footprint_bytes` stays seeded. A v1 trace records the
+footprint the router *expected*, not the VRAM the load actually consumed, so
+there is nothing to correct the estimate against — `vram_free_at_dispatch` is a
+single reading before the load, with no counterpart after it.
+
+This is left visible rather than papered over. The footprint estimate is an
+admission input, so an error there is a routing failure rather than a latency
+one (D2), and claiming to have learned it would be the easiest lie available in
+this file. Closing it needs a second VRAM reading after the load settles, which
+is a schema and an agent change, and belongs to whichever phase actually needs
+the accuracy.
+
+### D25 — The router replays its trace on start · Settled
+
+§4.2 said the router "rebuilds it from the trace log on start" and nothing did.
+Phase 1 did not notice because a static model has nothing to rebuild.
+
+`--replay_from` is deliberately separate from `--trace`. Defaulting to the trace
+is right for a restart, but the Phase 2 benchmark needs a learned model with a
+past that is not the run being measured — otherwise the arm improves *during*
+the measurement and the number describes the warm-up rather than the model.
+
+The ledger is not replayed. It accounts for requests in flight now, and nothing
+from a previous process is.

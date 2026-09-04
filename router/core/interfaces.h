@@ -58,6 +58,12 @@ struct ScoringConfig {
     // starting point for a saturated GPU.
     double contention_alpha = 1.0;
 
+    // §8: "EWMA half-lives are configuration, not constants". A cluster whose
+    // hardware changes should forget at a rate the operator chooses. Expressed
+    // in observations, not seconds — what matters is how many jobs a node has
+    // run, not how long it has been up.
+    double ewma_halflife = 20;
+
     // Consulted before the built-in table, in order. Lets an operator describe
     // hardware the built-ins do not recognise without a rebuild.
     std::vector<GpuSeed> gpu_seeds;
@@ -118,5 +124,9 @@ std::unique_ptr<IPolicy> make_round_robin_policy();
 std::unique_ptr<IPolicy> make_warmth_policy();
 
 std::unique_ptr<ICostModel> make_static_cost_model(const ScoringConfig& scoring);
+
+// Phase 2. Seeds every quantity from the static table and replaces each one
+// independently as observations arrive (§8).
+std::unique_ptr<ICostModel> make_learned_cost_model(const ScoringConfig& scoring);
 
 }  // namespace rf

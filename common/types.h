@@ -237,6 +237,10 @@ struct TraceRecord {
     std::string cost_model;
     std::string node_id;
     bool was_resident = false;
+    // VRAM this model was expected to need on this node. Phase 2 divides it by
+    // load_ms to learn load bandwidth, and nothing else in the record can
+    // reconstruct it. 0 = the router did not record one.
+    uint64_t footprint_bytes = 0;
 
     uint32_t prompt_tokens_est = 0;
     bool has_prompt_tokens_actual = false;
