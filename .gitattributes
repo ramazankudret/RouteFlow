@@ -1,0 +1,8 @@
+# Linux-first project developed on Windows (ARCHITECTURE §3). Normalise to LF
+# in the repository and check out LF everywhere: CRLF in a .py or .sh breaks
+# the shebang, and the tree must build unchanged on a Jetson.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary
