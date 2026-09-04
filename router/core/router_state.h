@@ -102,6 +102,13 @@ public:
     // arrives a poll interval late (§6.3).
     Json ledger_counts_json() const;
 
+    // Shared lock. What the placement manager needs to decide safely: whether a
+    // node is busy right now, and how much VRAM a model would take on it.
+    // Both go through RouterState rather than being recomputed elsewhere, so
+    // placement and admission cannot disagree about the same node.
+    uint32_t inflight_for(const std::string& node_id) const;
+    uint64_t footprint_for(const std::string& model, const NodeState& node) const;
+
 private:
     Reservation reserve_locked(const RequestFeatures& req,
                                const std::vector<std::string>& skip);

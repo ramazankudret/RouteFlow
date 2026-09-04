@@ -152,7 +152,7 @@ def main():
 
     print(f"\n{'':<28}{args.baseline:>14}{args.policy:>14}")
     print("  " + "-" * 62)
-    print("  PRIMARY — this is what Phase 1 is decided on (D12)")
+    print("  PRIMARY — wall-clock (D12)")
     row("wall-clock median (s)", percentile(base["walls"], 0.5),
         percentile(test["walls"], 0.5), 2)
     base_spread = f"{min(base['walls']):.1f}-{max(base['walls']):.1f}"
@@ -185,6 +185,9 @@ def main():
         percentile(test["total"], 0.95))
     row("ttft p50 (ms)", percentile(base["ttft"], 0.5), percentile(test["ttft"], 0.5))
     row("ttft p95 (ms)", percentile(base["ttft"], 0.95), percentile(test["ttft"], 0.95))
+    # Phase 3 is decided on this pair, not on wall-clock: cold starts must fall
+    # and p95 must not regress (§9). Both are already printed above; the label
+    # here is a reminder of which line is the criterion for which phase.
     row("cold starts per run", statistics.median(base["cold"]),
         statistics.median(test["cold"]))
     row("timing error (%)", percentile(base["timing"], 0.5) * 100,

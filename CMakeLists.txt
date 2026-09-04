@@ -51,12 +51,14 @@ add_library(rf_router STATIC
   router/core/dispatch.cpp
   router/core/ingest.cpp
   router/core/ledger.cpp
+  router/core/placement.cpp
   router/core/registry.cpp
   router/core/router_state.cpp
   router/core/trace_writer.cpp
   router/cost/seeds.cpp
   router/cost/static_cost_model.cpp
   router/cost/learned_cost_model.cpp
+  router/engine/ollama_adapter.cpp
   router/policy/candidates.cpp
   router/policy/round_robin.cpp
   router/policy/warmth.cpp

@@ -163,6 +163,17 @@ Json RouterState::ledger_counts_json() const {
     return ledger_.to_json();
 }
 
+uint32_t RouterState::inflight_for(const std::string& node_id) const {
+    std::shared_lock<std::shared_mutex> lock(mu_);
+    return ledger_.inflight(node_id);
+}
+
+uint64_t RouterState::footprint_for(const std::string& model,
+                                    const NodeState& node) const {
+    std::shared_lock<std::shared_mutex> lock(mu_);
+    return cost_->footprint_bytes(model, node, 0);
+}
+
 Json RouterState::stats_json() const {
     std::shared_lock<std::shared_mutex> lock(mu_);
     Json j = Json::object();

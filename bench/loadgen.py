@@ -30,6 +30,19 @@ import urllib.request
 PLANNER_MODEL = "planner:12b"
 WORKER_MODEL = "worker:3b"
 
+# The pressure scenario (Phase 3). Four models on nodes that hold two, accessed
+# with a skew: one model is asked for most of the time and three others rotate
+# through. That pattern is what defeats LRU — the rotating models sweep the hot
+# one out of VRAM even though it is the one about to be needed again — and it is
+# the ordinary situation on a local cluster with more models than memory.
+#
+# It is not a pattern chosen to flatter placement. Placement wins here only if
+# frequency is a better eviction signal than recency; if it is not, this
+# scenario says so just as clearly.
+PRESSURE_HOT = "hot:4b"
+PRESSURE_COLD = ["cold-a:4b", "cold-b:4b", "cold-c:4b", "cold-d:4b", "cold-e:4b"]
+PRESSURE_HOT_SHARE = 0.5
+
 
 def make_prompt(rng, approx_tokens):
     """Filler sized to a token count. Content is irrelevant to a simulated node
@@ -114,7 +127,49 @@ def active_policy(router, token):
         return None
 
 
+def run_pressure(args):
+    """Skewed access over a working set larger than any node's VRAM."""
+    rng = random.Random(args.seed)
+    results = []
+    started = time.monotonic()
+    cold_cycle = 0
+
+    for round_index in range(args.rounds):
+        batch = []
+        for _ in range(args.subagents + 1):
+            if rng.random() < PRESSURE_HOT_SHARE:
+                batch.append(PRESSURE_HOT)
+            else:
+                batch.append(PRESSURE_COLD[cold_cycle % len(PRESSURE_COLD)])
+                cold_cycle += 1
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            # Deliberately serial: the point is the *order* models are touched
+            # in, and concurrency would blur which eviction followed which
+            # request.
+            futures = [pool.submit(call, args.router, model, "subagent",
+                                   rng.randint(300, 600), rng.randint(40, 90),
+                                   args.token, args.timeout,
+                                   random.Random(args.seed + round_index * 100 + i),
+                                   args.stream)
+                       for i, model in enumerate(batch)]
+            for future in futures:
+                result = future.result()
+                results.append(result)
+                if not result["ok"]:
+                    print(f"  round {round_index + 1}: {result['error']}",
+                          file=sys.stderr)
+
+        print(f"  round {round_index + 1}/{args.rounds} done "
+              f"({time.monotonic() - started:.1f}s elapsed)", file=sys.stderr)
+
+    return results, time.monotonic() - started
+
+
 def run_scenario(args):
+    if args.scenario == "pressure":
+        return run_pressure(args)
+
     rng = random.Random(args.seed)
     results = []
     started = time.monotonic()
@@ -164,6 +219,10 @@ def main():
     parser.add_argument("--seed", type=int, default=7,
                         help="fixes prompt and output sizes; same seed, same requests")
     parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--scenario", choices=("agent", "pressure"), default="agent",
+                        help="agent: planner plus concurrent sub-agents (Phases 1-2). "
+                             "pressure: skewed access over a working set larger "
+                             "than VRAM (Phase 3)")
     parser.add_argument("--no-stream", dest="stream", action="store_false",
                         help="send buffered requests; TTFT is then unmeasurable")
     parser.set_defaults(stream=True)
@@ -204,6 +263,7 @@ def main():
     print("RESULT " + json.dumps({
         "label": args.label, "policy": running or args.policy, "seed": args.seed,
         "rounds": args.rounds, "subagents": args.subagents, "stream": args.stream,
+        "scenario": args.scenario,
         "wall_s": round(wall, 3), "ok": len(ok), "failed": len(failed),
         "cold_starts": cold, "by_node": by_node,
     }))

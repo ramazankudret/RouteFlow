@@ -469,3 +469,41 @@ the measurement and the number describes the warm-up rather than the model.
 
 The ledger is not replayed. It accounts for requests in flight now, and nothing
 from a previous process is.
+
+### D26 — Placement's eviction rule is comparative, not a staleness cutoff · Settled
+
+The first version evicted a resident model only if nothing had asked for it in
+`stale_ms` (300 s by default). Measurement showed that makes the manager inert
+in exactly the situation it exists for: during a busy period nothing is ever
+stale, so no eviction is ever permitted, and under memory pressure every preload
+needs room. Zero preloads across every run.
+
+The rule is now relative — displace the resident with the least demand, and only
+when the arrival is `evict_margin` times hotter (1.5 by default). That
+comparison *is* Phase 3's claim, that frequency beats the engine's recency; an
+absolute cutoff never made that claim at all. The margin stops two
+equally-wanted models swapping places forever, each swap paying a load for
+nothing.
+
+### D27 — Eviction is instant, so there is nothing to pre-evict · Settled
+
+§9 says "keep frequently-requested models resident, evict the stale", which
+reads as two jobs. It is one. Dropping a model from VRAM costs no measurable
+time, so evicting a stale model early saves nothing — the next request would
+have evicted it just as fast at dispatch. All the value is in *preloading*, and
+eviction appears only as the means of making room for one.
+
+The manager therefore has no background tidy pass. It evicts when, and only
+when, something better wants the space.
+
+### D28 — `resident()` dropped from IEngineAdapter · Settled
+
+§5 gave the adapter a method to list resident models. NodeState already carries
+that, polled by the agent, so the method would be a second path to the same fact
+— and two paths to one fact is one more thing that can disagree. The adapter is
+now the write side only: load, drop.
+
+Placement calls also go to the node's dispatch endpoint, which is the agent
+(D18), not to the engine directly. The agent already proxies these paths for
+inference; opening a second route to a port that is meant to stay on loopback
+would undo D18 for no gain.

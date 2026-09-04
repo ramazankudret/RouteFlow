@@ -35,6 +35,7 @@
 #include "common/util.h"
 #include "router/core/dispatch.h"
 #include "router/core/interfaces.h"
+#include "router/core/placement.h"
 #include "router/core/registry.h"
 #include "router/core/router_state.h"
 #include "router/core/trace_writer.h"
@@ -355,7 +356,6 @@ int main(int argc, char** argv) {
     }
 
     JobHistory history(cfg.get_u32("history", 500));
-    trace.set_observer([&history](const rf::TraceRecord& r) { history.add(r); });
 
     // --- policy, cost model, state ------------------------------------------
     const rf::ScoringConfig scoring = rf::ScoringConfig::from_config(cfg);
@@ -404,9 +404,19 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Phase 3. Off unless asked for: the baseline it has to beat is this being
+    // off, with each node managing its own residency the way the engine does.
+    rf::PlacementManager placement(registry, state,
+                                   rf::PlacementConfig::from_config(cfg), node_token);
+    trace.set_observer([&history, &placement](const rf::TraceRecord& r) {
+        history.add(r);
+        placement.observe(r);
+    });
+
     rf::Dispatcher dispatcher(state, registry, trace, node_token, request_timeout_ms);
 
     registry.start(node_token, poll_ms, node_timeout_ms);
+    placement.start();
 
     // --- http ----------------------------------------------------------------
     rf::http::Server server;
@@ -569,6 +579,7 @@ int main(int argc, char** argv) {
             j["trace_path"] = rf::Json(trace.path());
             j["trace_records_written"] = rf::Json(trace.records_written());
             j["trace_write_errors"] = rf::Json(trace.write_errors());
+            j["placement"] = placement.stats_json();
             res.send_json(200, j.dump(2));
             return;
         }
@@ -630,6 +641,7 @@ int main(int argc, char** argv) {
 
     g_stop.store(true);
     history.wake_all();
+    placement.stop();
     registry.stop();
     RF_INFO("routeflow-router stopped (%llu trace records written)",
             static_cast<unsigned long long>(trace.records_written()));

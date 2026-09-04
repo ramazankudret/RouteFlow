@@ -68,6 +68,10 @@ public:
     bool handle(const http::Request& req, http::Responder& res);
 
 private:
+    // Ollama's load/unload call: /api/generate, empty prompt, keep_alive.
+    void handle_placement(const std::string& model, const struct SimModelProfile& mp,
+                          bool unload, http::Responder& res);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

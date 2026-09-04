@@ -1,0 +1,61 @@
+{
+  "id": "pressure-b",
+  "gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "vram_total_bytes": 8000000000,
+  "engine_slots": 1,
+  "load_bandwidth_bytes_per_ms": 1000000.0,
+  "contention_alpha": 1.0,
+  "jitter": 0.04,
+  "seed": 2002,
+  "idle_power_watts": 16,
+  "busy_power_watts": 90,
+  "power_cap_watts": 100,
+  "temperature_c": 54,
+  "models": [
+    {
+      "name": "hot:4b",
+      "disk_bytes": 2850000000,
+      "footprint_bytes": 3000000000,
+      "prefill_tokens_per_ms": 1.8,
+      "decode_tokens_per_ms": 0.055
+    },
+    {
+      "name": "cold-a:4b",
+      "disk_bytes": 2850000000,
+      "footprint_bytes": 3000000000,
+      "prefill_tokens_per_ms": 1.8,
+      "decode_tokens_per_ms": 0.055
+    },
+    {
+      "name": "cold-b:4b",
+      "disk_bytes": 2850000000,
+      "footprint_bytes": 3000000000,
+      "prefill_tokens_per_ms": 1.8,
+      "decode_tokens_per_ms": 0.055
+    },
+    {
+      "name": "cold-c:4b",
+      "disk_bytes": 2850000000,
+      "footprint_bytes": 3000000000,
+      "prefill_tokens_per_ms": 1.8,
+      "decode_tokens_per_ms": 0.055
+    },
+    {
+      "name": "cold-d:4b",
+      "disk_bytes": 2850000000,
+      "footprint_bytes": 3000000000,
+      "prefill_tokens_per_ms": 1.8,
+      "decode_tokens_per_ms": 0.055
+    },
+    {
+      "name": "cold-e:4b",
+      "disk_bytes": 2850000000,
+      "footprint_bytes": 3000000000,
+      "prefill_tokens_per_ms": 1.8,
+      "decode_tokens_per_ms": 0.055
+    }
+  ],
+  "resident_at_start": [
+    "cold-a:4b"
+  ]
+}

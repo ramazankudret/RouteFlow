@@ -219,6 +219,52 @@ float SimNode::gpu_util() const {
     return slots > 0 ? busy / static_cast<float>(slots) : 0.f;
 }
 
+// A load costs what a load costs: the same modelled seconds an inference would
+// have paid, and the same slot. Making placement free in simulation would hide
+// the exact risk Phase 3 has to measure — that preloading steals capacity from
+// the requests it was meant to help.
+void SimNode::handle_placement(const std::string& model, const SimModelProfile& mp,
+                               bool unload, http::Responder& res) {
+    double load_ms = 0;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mu);
+        const bool resident = impl_->is_resident(model);
+        if (unload) {
+            if (resident) {
+                for (size_t i = 0; i < impl_->resident.size(); ++i) {
+                    if (impl_->resident[i].name != model) continue;
+                    impl_->vram_used -= impl_->resident[i].vram_bytes;
+                    impl_->resident.erase(impl_->resident.begin() +
+                                          static_cast<long>(i));
+                    break;
+                }
+            }
+        } else if (!resident) {
+            impl_->make_room(mp.footprint_bytes);
+            if (impl_->vram_used + mp.footprint_bytes >
+                impl_->profile.vram_total_bytes) {
+                res.send_error(507, "insufficient_vram",
+                               "model does not fit even with everything evicted");
+                return;
+            }
+            load_ms = impl_->jittered(static_cast<double>(mp.footprint_bytes) /
+                                      impl_->profile.load_bandwidth_bytes_per_ms);
+            impl_->resident.push_back({model, mp.footprint_bytes, now_ms()});
+            impl_->vram_used += mp.footprint_bytes;
+        }
+    }
+    sleep_ms(load_ms);
+
+    Json out = Json::object();
+    out["model"] = Json(model);
+    out["created_at"] = Json(iso8601(now_ms()));
+    out["response"] = Json("");
+    out["done"] = Json(true);
+    out["done_reason"] = Json(unload ? "unload" : "load");
+    out["load_duration"] = Json(load_ms * 1e6);  // Ollama reports nanoseconds
+    res.send_json(200, out.dump());
+}
+
 bool SimNode::handle(const http::Request& req, http::Responder& res) {
     const bool openai = req.path == "/v1/chat/completions";
     const bool ollama = req.path == "/api/chat" || req.path == "/api/generate";
@@ -238,9 +284,23 @@ bool SimNode::handle(const http::Request& req, http::Responder& res) {
         return true;
     }
 
+    // Placement, not inference. Ollama expresses load and unload as
+    // /api/generate with an empty prompt and a keep_alive — zero drops the
+    // model, anything else holds it — so the simulated node has to understand
+    // the same call or placement is untestable anywhere but on real hardware.
+    const std::string prompt_probe = extract_prompt(body);
+    if (ollama && body.has("keep_alive") && trim(prompt_probe).empty()) {
+        const std::string keep = body["keep_alive"].is_str()
+                                     ? body["keep_alive"].as_str()
+                                     : std::to_string(body["keep_alive"].as_i64());
+        const bool unload = (keep == "0" || keep == "0s");
+        handle_placement(model, *mp, unload, res);
+        return true;
+    }
+
     // Ollama defaults to streaming, OpenAI to buffered.
     const bool stream = body.has("stream") ? body["stream"].as_bool() : ollama;
-    const std::string prompt = extract_prompt(body);
+    const std::string prompt = prompt_probe;
     const uint32_t prompt_tokens = estimate_tokens(prompt);
     const uint32_t output_tokens = requested_output_tokens(body, 128);
 
