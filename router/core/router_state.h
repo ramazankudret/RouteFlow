@@ -89,6 +89,12 @@ public:
     const ScoringConfig& scoring() const { return scoring_; }
     Json stats_json() const;
 
+    // Per-node ledger counts, keyed by node id. Shared lock. The UI shows this
+    // rather than NodeState::inflight_reported because it is the number the
+    // scheduler actually reasoned about — the engine's own view is advisory and
+    // arrives a poll interval late (§6.3).
+    Json ledger_counts_json() const;
+
 private:
     Reservation reserve_locked(const RequestFeatures& req,
                                const std::vector<std::string>& skip);

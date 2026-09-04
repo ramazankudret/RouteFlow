@@ -140,6 +140,11 @@ std::string RouterState::cost_model_name() const {
     return cost_->name();
 }
 
+Json RouterState::ledger_counts_json() const {
+    std::shared_lock<std::shared_mutex> lock(mu_);
+    return ledger_.to_json();
+}
+
 Json RouterState::stats_json() const {
     std::shared_lock<std::shared_mutex> lock(mu_);
     Json j = Json::object();

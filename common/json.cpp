@@ -1,5 +1,6 @@
 #include "json.h"
 
+#include <cassert>
 #include <cctype>
 #include <cerrno>
 #include <cmath>
@@ -330,6 +331,11 @@ size_t Json::size() const {
 
 const Json& Json::at(size_t i) const {
     if (type_ != Type::Array || i >= arr_.size()) return null_json();
+    return arr_[i];
+}
+
+Json& Json::at(size_t i) {
+    assert(type_ == Type::Array && i < arr_.size());
     return arr_[i];
 }
 

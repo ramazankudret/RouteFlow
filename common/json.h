@@ -73,6 +73,11 @@ public:
     // key and an integer index is ambiguous for a literal 0, which is also a
     // null-pointer constant. at() also reads unmistakably at the call site.
     const Json& at(size_t i) const;  // out of range -> null Json
+    // Mutable element access, for building a document in place. Out of range is
+    // a programming error rather than a data condition, so it is an assertion,
+    // not a null: a caller that indexes past the end of an array it just built
+    // has a bug, and returning a shared null would hide it.
+    Json& at(size_t i);
     void push_back(Json v);
     const std::vector<Json>& items() const { return arr_; }
 

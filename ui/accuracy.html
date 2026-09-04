@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>RouteFlow &mdash; prediction accuracy</title>
+<style>
+:root{
+  --void:#05070a; --void-2:#0a0e13; --void-3:#101720;
+  --hair:#18202a; --hair-2:#26313d;
+  --fg:#e6efe9; --fg-2:#93a3ac; --fg-3:#5b6971;
+  --live:#33e07a; --live-2:#1d7d47; --cold:#d95926; --idle:#4a545e; --alert:#d55181;
+  --t-queue:#3987e5; --t-load:#d95926; --t-prefill:#199e70; --t-decode:#c98500; --t-evict:#d55181;
+  --f-mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --f-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Ubuntu,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --fs-0:9px; --fs-1:10px; --fs-2:11px; --fs-3:12px; --fs-4:14px; --fs-5:17px; --fs-6:22px; --fs-7:30px;
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:22px; --s-6:32px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--void);color:var(--fg);font:var(--fs-3)/1.5 var(--f-ui);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;background:radial-gradient(1100px 620px at 44% 42%,#0c141d 0%,#05070a 72%);z-index:0}
+a{color:var(--live);text-decoration:none}
+a:hover{color:#6ff0a4}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono)}
+.lbl{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--fg-3)}
+.dim{color:var(--fg-3)}
+
+.top{position:relative;z-index:5;display:flex;align-items:center;gap:var(--s-6);height:52px;padding:0 var(--s-5);border-bottom:1px solid var(--hair)}
+.brand{font:600 var(--fs-3)/1 var(--f-mono);letter-spacing:.28em;text-transform:uppercase}
+.brand em{font-style:normal;color:var(--live);text-shadow:0 0 10px rgba(51,224,122,.7)}
+.modes{display:flex;gap:var(--s-5)}
+.modes a{font:600 var(--fs-1)/1 var(--f-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--fg-3);padding:6px 0;border-bottom:1px solid transparent}
+.modes a:hover{color:var(--fg-2)}
+.modes a.is-active{color:var(--fg);border-bottom-color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.45)}
+.top-r{margin-left:auto;display:flex;gap:var(--s-5);font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.06em}
+.top-r b{color:var(--fg-2);font-weight:600}
+.top-r .live{color:var(--live)}
+
+.stage{position:relative;z-index:1;height:calc(100vh - 52px);min-height:680px}
+.canvas{position:absolute;inset:0}
+.canvas.is-dim{opacity:.5}
+.links{position:absolute;inset:0;width:100%;height:100%}
+.link{fill:none;stroke-width:1.4;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.link.is-warm{stroke:var(--live);opacity:.75;animation:rf-pulse 3.8s ease-in-out infinite}
+.link.is-cold{stroke:var(--cold);opacity:.7;animation:rf-pulse 4.6s ease-in-out infinite}
+.link.is-unknown{stroke:var(--idle);opacity:.5}
+.link.is-offline{stroke:#2a3138;opacity:.6;stroke-dasharray:2 7}
+.link-glow{fill:none;stroke-width:6;stroke-linecap:round;vector-effect:non-scaling-stroke;filter:blur(4px)}
+.link-glow.is-warm{stroke:var(--live);opacity:.22;animation:rf-pulse 3.8s ease-in-out infinite}
+.link-glow.is-cold{stroke:var(--cold);opacity:.18;animation:rf-pulse 4.6s ease-in-out infinite}
+.link-glow.is-unknown,.link-glow.is-offline{stroke:none}
+@keyframes rf-pulse{0%,100%{opacity:.42}50%{opacity:.95}}
+@keyframes rf-breathe{0%,100%{filter:drop-shadow(0 0 6px currentColor) drop-shadow(0 0 15px currentColor)}50%{filter:drop-shadow(0 0 9px currentColor) drop-shadow(0 0 26px currentColor)}}
+
+.node{position:absolute;transform:translate(-50%,-50%);width:184px;display:grid;justify-items:center;gap:8px;cursor:pointer;text-align:center}
+.dev{color:var(--live);animation:rf-breathe 5.2s ease-in-out infinite}
+.dev svg{display:block;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linejoin:round}
+.node.is-offline .dev{color:#39434b;animation:none;filter:none}
+.node.is-unknown .dev{color:var(--idle);animation:none;filter:drop-shadow(0 0 5px currentColor)}
+.node.is-hub .dev{color:#8ef0b6}
+.node-id{font:600 var(--fs-2)/1 var(--f-mono);letter-spacing:.18em;text-transform:uppercase}
+.node.is-offline .node-id{color:var(--fg-3)}
+.node-sub{font:var(--fs-0)/1.5 var(--f-mono);color:var(--fg-3);letter-spacing:.08em}
+.node-tel{display:flex;gap:var(--s-3);font:var(--fs-0)/1 var(--f-mono);color:var(--fg-2);letter-spacing:.04em}
+.node-tel s{text-decoration:none;color:var(--fg-3)}
+.node-vram{width:132px;height:3px;background:#121a21;position:relative}
+.node-vram i{position:absolute;top:0;bottom:0;left:0}
+.node-vram .vr-used{background:#2a3540}
+.node-vram .vr-res{background:var(--live);box-shadow:0 0 7px var(--live)}
+.node-vram .vr-res.is-zero{display:none}
+.shelf{display:grid;gap:3px;justify-items:center;margin-top:2px}
+.m-res{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:var(--live);text-shadow:0 0 8px rgba(51,224,122,.55)}
+.m-disk{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:#424d56}
+.m-none{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:#4e5a63}
+.node.is-selected .node-id{color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.5)}
+.node-queue{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;color:var(--t-queue);text-shadow:0 0 8px rgba(57,135,229,.6)}
+.node-flag{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;color:var(--cold)}
+
+.panel{position:absolute;top:0;right:0;bottom:0;width:452px;padding:var(--s-5) var(--s-5) var(--s-6);border-left:1px solid var(--hair);background:rgba(5,7,10,.9);backdrop-filter:blur(12px);overflow-y:auto;z-index:3}
+.panel::-webkit-scrollbar{width:8px}
+.panel::-webkit-scrollbar-thumb{background:#1c242c}
+.p-h{display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)}
+.p-id{font:600 var(--fs-5)/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase}
+.p-gpu{font:var(--fs-2)/1.5 var(--f-mono);color:var(--fg-2)}
+.p-ip{font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.08em}
+.p-sec{margin-top:var(--s-5);padding-top:var(--s-3);border-top:1px solid var(--hair)}
+.p-sec>.lbl{display:block;margin-bottom:var(--s-3)}
+.tel{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-3) var(--s-5)}
+.tel-i{display:grid;gap:5px}
+.tel-v{font:var(--fs-5)/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.tel-v u{text-decoration:none;font-size:var(--fs-1);color:var(--fg-3)}
+.tel-v.is-unknown{color:var(--fg-3)}
+.tel-v.is-live{color:var(--live)}
+.tel-v.is-hot{color:var(--cold)}
+.bar-row{display:flex;justify-content:space-between;font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);margin-bottom:7px}
+.bar-row b{color:var(--fg-2)}
+.bar{position:relative;height:6px;background:#111820}
+.bar i{position:absolute;top:0;bottom:0;left:0}
+.bar .b-used{background:#28323c}
+.bar .b-res{background:var(--live);box-shadow:0 0 8px var(--live)}
+.bar .b-res.is-zero{display:none}
+.bar-key{display:flex;gap:var(--s-4);margin-top:9px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.06em}
+.bar-key span{display:inline-flex;align-items:center;gap:6px}
+.bk{width:8px;height:8px}
+.bk-res{background:var(--live);box-shadow:0 0 6px var(--live)}
+.bk-oth{background:#28323c}
+.bk-free{background:#111820;box-shadow:inset 0 0 0 1px #28323c}
+.mcols{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.mcol{padding-right:var(--s-4)}
+.mcol+.mcol{padding-left:var(--s-4);padding-right:0;border-left:1px solid var(--hair)}
+.mcol>.lbl{display:block;margin-bottom:var(--s-3)}
+.mcol.is-res>.lbl{color:var(--live)}
+.mi{padding:7px 0;border-bottom:1px solid #121820}
+.mi:last-child{border-bottom:0}
+.mi-n{font:var(--fs-1)/1.35 var(--f-mono);letter-spacing:.03em;word-break:break-all}
+.mcol.is-res .mi-n{color:var(--live)}
+.mcol.is-disk .mi-n{color:var(--fg-2)}
+.mi-m{font:var(--fs-0)/1.4 var(--f-mono);color:var(--fg-3);margin-top:3px;font-variant-numeric:tabular-nums}
+.p-note{font:var(--fs-1)/1.6 var(--f-mono);color:var(--fg-3);letter-spacing:.03em}
+.p-note b{color:var(--fg-2)}
+.eng{display:flex;flex-wrap:wrap;gap:var(--s-4);font:var(--fs-1)/1 var(--f-mono);letter-spacing:.06em;color:var(--fg-2)}
+.eng span{display:inline-flex;align-items:center;gap:7px}
+.led{width:7px;height:7px;border-radius:50%;background:var(--idle)}
+.led.is-on{background:var(--live);box-shadow:0 0 8px var(--live)}
+.led.is-off{background:#3a2420;box-shadow:0 0 6px rgba(217,89,38,.5)}
+.state-line{font:var(--fs-1)/1.7 var(--f-mono);color:var(--fg-3);letter-spacing:.04em}
+.state-line b{color:var(--fg-2)}
+.state-line .warn{color:var(--cold)}
+.state-line .live{color:var(--live)}
+.empty{border:1px dashed var(--hair-2);padding:var(--s-5);max-width:460px}
+.empty-t{font:600 var(--fs-3)/1.3 var(--f-mono);letter-spacing:.06em;margin-bottom:6px}
+.empty-d{font:var(--fs-1)/1.6 var(--f-mono);color:var(--fg-3)}
+.stage-note{position:absolute;left:var(--s-5);bottom:var(--s-4);z-index:2;font:var(--fs-0)/1.7 var(--f-mono);color:#3d474f;letter-spacing:.08em;max-width:420px}
+
+.overlay{position:absolute;inset:0;z-index:3;overflow-y:auto;background:rgba(5,7,10,.87);backdrop-filter:blur(8px)}
+.overlay::-webkit-scrollbar{width:9px}
+.overlay::-webkit-scrollbar-thumb{background:#1c242c}
+.ov-in{padding:var(--s-5) var(--s-6) var(--s-6);max-width:1560px}
+.a-h{display:flex;align-items:flex-start;gap:var(--s-6);padding-bottom:var(--s-4);border-bottom:1px solid var(--hair)}
+.a-h h1{margin:7px 0 0;font:600 var(--fs-6)/1.1 var(--f-mono);letter-spacing:.02em}
+.a-h .a-sub{margin-left:auto;max-width:62ch;font:var(--fs-1)/1.7 var(--f-mono);color:var(--fg-3);letter-spacing:.04em;text-align:right}
+.a-h .a-sub b{color:var(--fg-2)}
+.acc{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-6);margin-top:var(--s-5)}
+.pan-h{display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:7px}
+.pan-h h2{margin:0;font:600 var(--fs-5)/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase}
+.pan-h .n{font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.1em}
+.pan-d{font:var(--fs-1)/1.7 var(--f-mono);color:var(--fg-3);letter-spacing:.04em;max-width:64ch;min-height:54px}
+.pan-p{font:var(--fs-0)/1 var(--f-mono);color:var(--fg-2);letter-spacing:.08em;margin:9px 0 var(--s-4)}
+.plot{display:grid;grid-template-columns:52px 1fr;grid-template-rows:auto 28px}
+.plot-y{position:relative}
+.plot-y span{position:absolute;right:10px;transform:translateY(50%);font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.plot-y i{position:absolute;right:0;width:5px;height:1px;background:var(--hair-2);transform:translateY(50%)}
+.plot-x{grid-column:2;position:relative}
+.plot-x span{position:absolute;top:9px;transform:translateX(-50%);font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.plot-x i{position:absolute;top:0;width:1px;height:5px;background:var(--hair-2)}
+.plot-area{position:relative;height:360px;border-left:1px solid var(--hair-2);border-bottom:1px solid var(--hair-2);background:rgba(255,255,255,.012)}
+.plot-area i.gx{position:absolute;top:0;bottom:0;width:1px;background:#131b23}
+.plot-area i.gy{position:absolute;left:0;right:0;height:1px;background:#131b23}
+.plot-svg{position:absolute;inset:0;width:100%;height:100%}
+.ref-l{position:absolute;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.1em;transform:translate(-100%,0)}
+.dot{position:absolute;width:8px;height:8px;border-radius:50%;transform:translate(-50%,50%)}
+.dot.is-warm{background:var(--t-queue);box-shadow:0 0 7px rgba(57,135,229,.85)}
+.dot.is-cold{background:var(--t-load);box-shadow:0 0 7px rgba(217,89,38,.85)}
+.dot.is-neutral{background:#8d9aa3;box-shadow:0 0 6px rgba(141,154,163,.5)}
+.plabel{position:absolute;transform:translate(-50%,-16px);font:var(--fs-0)/1.3 var(--f-mono);color:var(--fg-2);white-space:nowrap;letter-spacing:.06em;background:rgba(5,7,10,.9);padding:2px 5px;border:1px solid var(--hair-2)}
+.p-legend{display:flex;flex-wrap:wrap;gap:var(--s-5);align-items:center;padding:var(--s-3) 0;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.07em;border-bottom:1px solid var(--hair)}
+.p-legend span{display:inline-flex;align-items:center;gap:7px}
+.plk{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+.pll{width:18px;height:1px;background:var(--fg-2);flex:0 0 auto}
+.stats{display:grid;gap:9px;padding-top:var(--s-4)}
+.stat{display:flex;gap:var(--s-4);align-items:baseline;font:var(--fs-1)/1.4 var(--f-mono);letter-spacing:.04em}
+.stat .s-l{color:var(--fg-3);min-width:104px}
+.stat .s-v{color:var(--fg);font-variant-numeric:tabular-nums;min-width:132px}
+.stat .s-n{color:var(--fg-3)}
+.stat.is-head .s-v{color:var(--live)}
+.a-foot{margin-top:var(--s-6);padding-top:var(--s-3);border-top:1px solid var(--hair)}
+.a-note{font:var(--fs-1)/1.8 var(--f-mono);color:var(--fg-3);letter-spacing:.04em;max-width:110ch;margin:var(--s-5) 0 0}
+.a-note b{color:var(--fg-2)}
+
+
+.canvas{cursor:grab;touch-action:none;overflow:hidden}
+.canvas.is-panning{cursor:grabbing}
+.node{touch-action:none}
+.node:hover .dev{color:#7bf0ad}
+.node.is-drag{z-index:9}
+.node.is-drag .dev{animation:none;filter:drop-shadow(0 0 12px currentColor) drop-shadow(0 0 34px currentColor)}
+.node.is-hub:before{content:"";position:absolute;left:50%;top:16px;width:340px;height:340px;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(51,224,122,.12),rgba(51,224,122,0) 68%);pointer-events:none;z-index:-1}
+.link-flow{fill:none;stroke:var(--live);stroke-width:2.2;stroke-linecap:round;vector-effect:non-scaling-stroke;stroke-dasharray:1 22;opacity:.9;filter:drop-shadow(0 0 5px var(--live));animation:rf-flow 2.6s linear infinite}
+.link-flow.is-mute{opacity:0}
+@keyframes rf-flow{from{stroke-dashoffset:46}to{stroke-dashoffset:0}}
+.view-hint{position:absolute;right:var(--s-4);bottom:var(--s-4);z-index:2;display:flex;gap:var(--s-4);align-items:center;font:var(--fs-0)/1 var(--f-mono);color:#3d474f;letter-spacing:.1em}
+.view-reset{appearance:none;background:none;border:1px solid var(--hair-2);color:var(--fg-3);font:var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;padding:6px 9px;cursor:pointer}
+.view-reset:hover{color:var(--live);border-color:var(--live-2)}
+
+.canvas{overflow:hidden}
+
+
+
+.dev{position:relative;display:grid;place-items:center;padding:5px}
+.dev svg{position:relative;z-index:2}
+.dev-lvl{position:absolute;left:9px;right:9px;bottom:7px;z-index:1;height:var(--vram,0%);border-radius:2px;background:linear-gradient(180deg,rgba(51,224,122,.4),rgba(51,224,122,.05));border-top:1px solid rgba(51,224,122,.85);box-shadow:0 0 14px rgba(51,224,122,.4);animation:rf-lvl 5.4s ease-in-out infinite}
+.dev-lvl.is-zero{display:none}
+@keyframes rf-lvl{0%,100%{opacity:.75;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
+.heat{position:absolute;top:50%;left:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;border:1px solid currentColor;opacity:.4;pointer-events:none;animation:rf-heat var(--heat-ms,4s) ease-in-out infinite}
+.heat.is-hot{width:92px;height:92px;margin:-46px 0 0 -46px;opacity:.6}
+@keyframes rf-heat{0%,100%{transform:scale(.92);opacity:.28}50%{transform:scale(1.06);opacity:.7}}
+.shock{position:absolute;top:50%;left:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;border:1px solid var(--t-evict);pointer-events:none;opacity:0;animation:rf-shock 7s ease-out infinite}
+.shock.s2{animation-delay:.35s}
+@keyframes rf-shock{0%{transform:scale(.5);opacity:0}6%{opacity:.85}34%{transform:scale(3.1);opacity:0}100%{transform:scale(3.1);opacity:0}}
+.spark{position:absolute;width:3px;height:3px;border-radius:50%;background:#d95926;box-shadow:0 0 8px #d95926;pointer-events:none;animation:rf-spark 1.7s steps(1,end) infinite}
+.spark.s1{top:6px;left:-6px}
+.spark.s2{top:16px;left:-13px;animation-delay:.55s}
+@keyframes rf-spark{0%,42%{opacity:0}46%{opacity:1}52%{opacity:.2}58%{opacity:.9}70%,100%{opacity:0}}
+.canvas.is-focusing .node:not(.is-focus){opacity:.28}
+.canvas.is-focusing .link:not(.is-focus),.canvas.is-focusing .link-glow:not(.is-focus),.canvas.is-focusing .link-flow:not(.is-focus){opacity:.08}
+.canvas.is-focusing .link.is-focus{stroke-width:3;filter:drop-shadow(0 0 7px currentColor)}
+.node,.link,.link-glow,.link-flow{transition:opacity .22s ease}
+.minimap{position:absolute;right:var(--s-4);bottom:52px;z-index:4;width:154px;height:82px;border:1px solid var(--hair);background:rgba(5,7,10,.75)}
+.minimap i{position:absolute;width:5px;height:5px;border-radius:50%;transform:translate(-50%,-50%);background:var(--idle)}
+.minimap i.is-warm{background:var(--live);box-shadow:0 0 5px var(--live)}
+.minimap i.is-offline{background:#3a2420}
+.minimap i.is-hub{width:7px;height:7px;background:#8ef0b6;box-shadow:0 0 7px var(--live)}
+.minimap b{position:absolute;left:6px;top:5px;font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.12em;color:#39434b;font-weight:400}
+.boot{position:absolute;inset:0;z-index:6;pointer-events:none;background:linear-gradient(90deg,rgba(5,7,10,0) 0%,rgba(51,224,122,.11) 46%,rgba(51,224,122,.5) 50%,rgba(51,224,122,.11) 54%,rgba(5,7,10,0) 100%);animation:rf-boot 1.15s ease-out 1 forwards}
+@keyframes rf-boot{from{transform:translateX(-100%)}to{transform:translateX(100%);opacity:0}}
+.node{animation:rf-in .5s ease-out both;animation-delay:calc(var(--i,0)*.09s + .12s)}
+@keyframes rf-in{from{opacity:0;transform:translate(-50%,-46%)}to{opacity:1;transform:translate(-50%,-50%)}}
+.node.is-drag,.node.is-mute{animation:none}
+.links{animation:rf-fade .9s ease-out .5s both}
+@keyframes rf-fade{from{opacity:0}to{opacity:1}}
+
+.dev{display:inline-grid;width:-moz-fit-content;width:fit-content;justify-self:center}
+.stage:has(.canvas[data-reserve-right]) .minimap{right:468px}
+.stage:has(.canvas[data-reserve-right]) .view-hint{right:468px}
+
+.world{position:absolute;top:0;left:0;width:1180px;height:760px;margin:0;transform-origin:0 0;transform:translate(var(--rf-x,0px),var(--rf-y,0px)) scale(var(--rf-s,.8));background-image:radial-gradient(#111d27 1px,transparent 1px);background-size:46px 46px}
+
+.acc{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-6) var(--s-6);margin-top:var(--s-5)}
+.acc .span2{grid-column:1 / -1}
+.hist{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:7px;height:190px;align-items:end;border-bottom:1px solid var(--hair-2);padding-bottom:0}
+.hcol{display:grid;align-content:end;gap:2px;position:relative}
+.hcol i{display:block;width:100%}
+.hcol .h-cold{background:var(--t-load);box-shadow:0 0 10px rgba(217,89,38,.35)}
+.hcol .h-warm{background:var(--t-queue);box-shadow:0 0 10px rgba(57,135,229,.35)}
+.hcol .h-zero{display:none}
+.hcol b{position:absolute;top:-15px;left:0;right:0;text-align:center;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-2);font-weight:400}
+.hx{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:7px;margin-top:8px}
+.hx span{text-align:center;font:var(--fs-0)/1.4 var(--f-mono);color:var(--fg-3);letter-spacing:.03em}
+.hzero{position:relative;height:1px;background:var(--hair-2);margin:0}
+.hmark{display:flex;justify-content:space-between;margin-top:10px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.08em}
+.hmark b{color:var(--fg-2);font-weight:400}
+.dumb{display:grid;gap:0;margin-top:var(--s-2)}
+.drow{display:grid;grid-template-columns:104px 1fr 128px;gap:var(--s-4);align-items:center;padding:11px 0;border-bottom:1px solid #101720}
+.drow:last-child{border-bottom:0}
+.dname{font:600 var(--fs-1)/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--fg-2)}
+.dtrack{position:relative;height:16px}
+.dtrack:before{content:"";position:absolute;left:0;right:0;top:8px;height:1px;background:#131b23}
+.dtrack i.gl{position:absolute;top:2px;bottom:2px;width:1px;background:#131b23}
+.dlink{position:absolute;top:7px;height:2px;background:linear-gradient(90deg,var(--t-queue),var(--t-load));opacity:.55}
+.dpt{position:absolute;top:2px;width:11px;height:11px;border-radius:50%;transform:translateX(-50%)}
+.dpt.is-warm{background:var(--t-queue);box-shadow:0 0 8px rgba(57,135,229,.8)}
+.dpt.is-cold{background:var(--t-load);box-shadow:0 0 8px rgba(217,89,38,.8)}
+.dpt.is-none{background:transparent;box-shadow:inset 0 0 0 1px var(--idle)}
+.dval{text-align:right;font:var(--fs-0)/1.5 var(--f-mono);color:var(--fg-3);font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.dval b{color:var(--fg-2);font-weight:400}
+.dval .warm{color:#7fb2e8}
+.dval .cold{color:#e79268}
+.dnote{grid-column:2 / -1;font:var(--fs-0)/1.6 var(--f-mono);color:var(--fg-3);letter-spacing:.04em}
+.dax{display:flex;justify-content:space-between;margin-top:9px;padding-left:120px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);font-variant-numeric:tabular-nums}
+.tl{position:relative;height:180px;border-left:1px solid var(--hair-2);border-bottom:1px solid var(--hair-2)}
+.tl i.gy{position:absolute;left:0;right:0;height:1px;background:#131b23}
+.tl i.gx{position:absolute;top:0;bottom:0;width:1px;background:#101720}
+.tl svg{position:absolute;inset:0;width:100%;height:100%}
+.tl .band-f{fill:rgba(57,135,229,.13)}
+.tl .line-w{fill:none;stroke:var(--t-queue);stroke-width:1.6;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 5px rgba(57,135,229,.6))}
+.tl .line-c{fill:none;stroke:var(--t-load);stroke-width:1.6;stroke-dasharray:5 4;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 5px rgba(217,89,38,.5))}
+.tl .zero{stroke:#93a3ac;stroke-width:1;vector-effect:non-scaling-stroke;opacity:.5}
+.tl-y{position:absolute;left:-46px;transform:translateY(50%);font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);font-variant-numeric:tabular-nums}
+.tl-wrap{padding-left:46px}
+.tl-x{display:flex;justify-content:space-between;margin-top:8px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.06em}
+.tl-ev{position:absolute;top:0;bottom:0;width:1px;background:var(--t-evict);opacity:.6}
+.tl-ev b{position:absolute;top:4px;left:6px;font:var(--fs-0)/1 var(--f-mono);color:#e2a1b8;font-weight:400;white-space:nowrap;letter-spacing:.06em}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Route<em>Flow</em></span>
+  <nav class="modes">
+    <a href="cluster.html">cluster</a>
+    <a href="jobs.html">jobs</a>
+    <a href="decision.html">decision</a>
+    <a href="accuracy.html" class="is-active">accuracy</a>
+  </nav>
+  <div class="top-r">
+    <span>nodes <b data-rf="nodes_total">0</b></span><span>engines <b data-rf="engines_up">0</b> up</span><span>warm <b class="live" data-rf="warm_total">0</b></span><span>inflight <b data-rf="inflight_total">0</b></span><span>tick <b class="num">1.0 s</b></span>
+  </div>
+</header>
+<div class="stage">
+    <div class="canvas is-dim" id="rf-canvas">
+      <div class="world" id="rf-world" style="transform:translate(214px,28px) scale(0.857)">
+      <span class="boot" aria-hidden="true"></span>
+      <svg class="links" viewBox="0 0 1180 760" preserveAspectRatio="none" aria-hidden="true">
+        <path class="link-glow is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link-glow is-warm" data-rf-link="desktop-01" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link-glow is-warm" data-rf-link="jetson-01" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link-glow is-unknown" data-rf-link="laptop-01" data-a="hub" data-b="laptop-01" d="M 368 366 C 292.4 366, 275.6 596, 200 596"></path>
+        <path class="link-glow is-offline" data-rf-link="nuc-01" data-a="hub" data-b="nuc-01" d="M 368 366 C 493.1 366, 520.9 580, 646 580"></path>
+        <path class="link-glow is-warm" data-rf-link="mini-01" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+        <path class="link is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link is-warm" data-rf-link="desktop-01" style="stroke-width:2.1" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link is-warm" data-rf-link="jetson-01" style="stroke-width:1.2" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link is-unknown" data-rf-link="laptop-01" style="stroke-width:1.4" data-a="hub" data-b="laptop-01" d="M 368 366 C 292.4 366, 275.6 596, 200 596"></path>
+        <path class="link is-offline" data-rf-link="nuc-01" style="stroke-width:1.4" data-a="hub" data-b="nuc-01" d="M 368 366 C 493.1 366, 520.9 580, 646 580"></path>
+        <path class="link is-warm" data-rf-link="mini-01" style="stroke-width:2" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+        <path class="link-flow is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link-flow is-warm" data-rf-link="desktop-01" style="animation-duration:3.4s" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link-flow is-warm" data-rf-link="jetson-01" style="animation-duration:1.3s" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link-flow is-warm" data-rf-link="mini-01" style="animation-duration:2.4s" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+      </svg>
+      <div class="node" data-rf-item="client" style="left:7.46%;top:48.16%">
+        <span class="dev"><svg width="34" height="48" viewBox="0 0 34 48" aria-hidden="true"><rect x="9" y="5" width="17" height="38" rx="3"></rect><line x1="14" y1="10" x2="21" y2="10"></line><circle cx="17.5" cy="38" r="1.4"></circle></svg></span>
+        <span class="node-id">clients</span>
+        <span class="node-sub">3 apps · openai-compatible</span>
+      </div>
+      <div class="node is-hub" data-rf-item="hub" style="left:31.19%;top:48.16%">
+        <span class="dev"><svg width="56" height="46" viewBox="0 0 56 46" aria-hidden="true"><rect x="8" y="24" width="40" height="13" rx="6.5"></rect><line x1="18" y1="24" x2="13" y2="8"></line><line x1="38" y1="24" x2="43" y2="8"></line><circle cx="19" cy="30.5" r="1.6"></circle><circle cx="28" cy="30.5" r="1.6"></circle><circle cx="37" cy="30.5" r="1.6"></circle></svg></span>
+        <span class="node-id">routeflow</span>
+        <span class="node-sub">localhost:11500 · scheduler</span>
+        <span class="node-tel"><span>5 nodes</span><span>4 up</span><span>3 warm</span></span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="desktop-01" style="left:14.24%;top:17.11%;--i:0">
+        <span class="dev"><span class="dev-lvl" style="--vram:55%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="shock" aria-hidden="true"></span><span class="shock s2" aria-hidden="true"></span><svg width="46" height="62" viewBox="0 0 46 62" aria-hidden="true"><rect x="12" y="4" width="22" height="54" rx="2"></rect><line x1="17" y1="12" x2="29" y2="12"></line><line x1="17" y1="17" x2="29" y2="17"></line><line x1="17" y1="22" x2="29" y2="22"></line><circle cx="23" cy="50" r="2.5"></circle></svg></span>
+        <span class="node-id" data-rf="id">desktop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.12</span> &middot; <span data-rf="gpu_name">RTX 4060 Laptop</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">7%</span><span data-rf="temperature_c">52&deg;</span><span data-rf="power_watts">15.7 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:55.3%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="jetson-01" style="left:50.51%;top:15.53%;--i:1">
+        <span class="dev"><span class="dev-lvl" style="--vram:42%" aria-hidden="true"></span><span class="heat is-hot" style="color:#d95926;--heat-ms:2.2s" aria-hidden="true"></span><svg width="52" height="46" viewBox="0 0 52 46" aria-hidden="true"><rect x="4" y="14" width="44" height="28" rx="2"></rect><line x1="12" y1="14" x2="12" y2="8"></line><line x1="17" y1="14" x2="17" y2="8"></line><line x1="22" y1="14" x2="22" y2="8"></line><line x1="27" y1="14" x2="27" y2="8"></line><line x1="32" y1="14" x2="32" y2="8"></line><rect x="12" y="21" width="12" height="11" rx="1"></rect><rect x="29" y="24" width="9" height="7" rx="1"></rect></svg></span>
+        <span class="node-id" data-rf="id">jetson-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.31</span> &middot; <span data-rf="gpu_name">Jetson Orin NX</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">62%</span><span data-rf="temperature_c">78&deg;</span><span data-rf="power_watts">23.6 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:63.3%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:42.0%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-res" data-rf="name">&#9679; llama3.2:3b &middot; 1.88 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">phi3.5:3.8b &middot; on disk</span>
+        </span>
+        <span class="node-queue" data-rf="inflight">queue 1 &middot; 3/2 slots</span>
+      </div>
+      <div class="node is-unknown" data-rf-item="node" data-node="laptop-01" style="left:16.95%;top:78.42%;--i:2">
+        <span class="dev"><span class="dev-lvl is-zero" style="--vram:0%" aria-hidden="true"></span><svg width="52" height="46" viewBox="0 0 52 46" aria-hidden="true"><rect x="11" y="8" width="30" height="21" rx="1.5"></rect><path d="M5 40 L47 40 L41 31 L11 31 Z"></path></svg></span>
+        <span class="node-id" data-rf="id">laptop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.44</span> &middot; <span data-rf="gpu_name">GeForce MX550 4 GB</span></span>
+        <span class="node-tel"><s data-rf="gpu_util">&mdash;</s><s data-rf="temperature_c">&mdash;</s><s data-rf="power_watts">&mdash;</s></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:25.0%"></i><i class="vr-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></span>
+        <span class="shelf">
+          <span class="m-none" data-rf="residency_known">residency unknown</span>
+          <span class="m-disk" data-rf="models_on_disk">qwen2.5:7b &middot; llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+      <div class="node is-offline" data-rf-item="node" data-node="nuc-01" style="left:54.75%;top:76.32%;--i:3">
+        <span class="dev"><span class="dev-lvl is-zero" style="--vram:0%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="spark s1" aria-hidden="true"></span><span class="spark s2" aria-hidden="true"></span><svg width="44" height="46" viewBox="0 0 44 46" aria-hidden="true"><rect x="8" y="10" width="28" height="28" rx="4"></rect><circle cx="22" cy="24" r="4.5"></circle><line x1="13" y1="33" x2="19" y2="33"></line></svg></span>
+        <span class="node-id" data-rf="id">nuc-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.57</span> &middot; <span data-rf="gpu_name">Intel Arc A770</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">0%</span><span data-rf="temperature_c">41&deg;</span><span data-rf="power_watts">9.2 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:2.5%"></i><i class="vr-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></span>
+        <span class="shelf">
+          <span class="m-none">all cold &middot; nothing resident</span>
+          <span class="m-disk" data-rf="models_on_disk">qwen2.5:7b &middot; mistral-nemo:12b &middot; on disk</span>
+        </span>
+        <span class="node-flag" data-rf="engine_healthy">engine down</span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="mini-01" style="left:64.41%;top:44.21%;--i:4">
+        <span class="dev"><span class="dev-lvl" style="--vram:14%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><svg width="52" height="40" viewBox="0 0 52 40" aria-hidden="true"><rect x="7" y="14" width="38" height="15" rx="3"></rect><circle cx="14" cy="21.5" r="1.6"></circle><line x1="30" y1="21.5" x2="39" y2="21.5"></line></svg></span>
+        <span class="node-id" data-rf="id">mini-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.68</span> &middot; <span data-rf="gpu_name">Apple M2 Pro</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">11%</span><span data-rf="temperature_c">47&deg;</span><span data-rf="power_watts">18.4 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:37.5%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:13.8%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">phi3.5:3.8b &middot; mistral-nemo:12b &middot; on disk</span>
+        </span>
+      </div>
+      </div>
+    </div>
+    <div class="minimap" id="rf-minimap" aria-hidden="true">
+      <b>view</b>
+      <i class="" data-for="clients"></i>
+      <i class="is-hub" data-for="hub"></i>
+      <i class="is-warm" data-for="desktop-01"></i>
+      <i class="is-warm" data-for="jetson-01"></i>
+      <i class="" data-for="laptop-01"></i>
+      <i class="is-offline" data-for="nuc-01"></i>
+      <i class="is-warm" data-for="mini-01"></i>
+    </div>
+    <div class="overlay">
+      <div class="ov-in">
+        <div class="a-h">
+          <div>
+            <span class="lbl">prediction accuracy</span>
+            <h1>predicted vs measured</h1>
+          </div>
+          <div class="a-sub">Two errors, kept apart on purpose. Timing error is dominated by <b>cold starts</b>, where load time moves with page cache and disk contention. Length error is dominated by a few <b>runaway generations</b>. One number would hide both.</div>
+        </div>
+        <div class="acc">
+      <section data-rf-item="accuracy_total">
+        <div class="pan-h"><h2>total duration</h2><span class="n">n 26 &middot; last 6 h</span></div>
+        <p class="pan-d">Predicted completion time against measured completion time. A point above the 1:1 line ran longer than the scheduler promised.</p>
+        <div class="pan-p">predicted_total_ms &rarr; total_ms</div>
+        <div class="plot">
+          <div class="plot-y">
+            <i style="bottom:0%"></i><span style="bottom:0%">0</span>
+            <i style="bottom:25%"></i><span style="bottom:25%">4 s</span>
+            <i style="bottom:50%"></i><span style="bottom:50%">8 s</span>
+            <i style="bottom:75%"></i><span style="bottom:75%">12 s</span>
+            <i style="bottom:100%"></i><span style="bottom:100%">16 s</span>
+          </div>
+          <div class="plot-area">
+              <i class="gx" style="left:25%"></i>
+              <i class="gx" style="left:50%"></i>
+              <i class="gx" style="left:75%"></i>
+              <i class="gx" style="left:100%"></i>
+              <i class="gy" style="bottom:25%"></i>
+              <i class="gy" style="bottom:50%"></i>
+              <i class="gy" style="bottom:75%"></i>
+              <i class="gy" style="bottom:100%"></i>
+              <svg class="plot-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="100" x2="100" y2="0" stroke="#93a3ac" stroke-width="1" vector-effect="non-scaling-stroke"></line></svg>
+            <span class="ref-l" style="left:97%;bottom:93%">1:1</span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:55.13%;bottom:54.50%"><span hidden data-rf="predicted_total_ms">8820</span><span hidden data-rf="total_ms">8720</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:11.56%;bottom:11.94%"><span hidden data-rf="predicted_total_ms">1850</span><span hidden data-rf="total_ms">1910</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:25.12%;bottom:26.63%"><span hidden data-rf="predicted_total_ms">4020</span><span hidden data-rf="total_ms">4260</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:0.69%;bottom:0.56%"><span hidden data-rf="predicted_total_ms">110</span><span hidden data-rf="total_ms">90</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:13.13%;bottom:14.00%"><span hidden data-rf="predicted_total_ms">2100</span><span hidden data-rf="total_ms">2240</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:24.88%;bottom:23.25%"><span hidden data-rf="predicted_total_ms">3980</span><span hidden data-rf="total_ms">3720</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:32.56%;bottom:34.13%"><span hidden data-rf="predicted_total_ms">5210</span><span hidden data-rf="total_ms">5460</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:7.75%;bottom:7.38%"><span hidden data-rf="predicted_total_ms">1240</span><span hidden data-rf="total_ms">1180</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:56.94%;bottom:58.81%"><span hidden data-rf="predicted_total_ms">9110</span><span hidden data-rf="total_ms">9410</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:39.88%;bottom:38.25%"><span hidden data-rf="predicted_total_ms">6380</span><span hidden data-rf="total_ms">6120</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:17.25%;bottom:18.13%"><span hidden data-rf="predicted_total_ms">2760</span><span hidden data-rf="total_ms">2900</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:46.56%;bottom:44.88%"><span hidden data-rf="predicted_total_ms">7450</span><span hidden data-rf="total_ms">7180</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:9.50%;bottom:10.06%"><span hidden data-rf="predicted_total_ms">1520</span><span hidden data-rf="total_ms">1610</span></span>
+              <span class="dot is-warm" data-rf-item="trace" style="left:29.00%;bottom:28.00%"><span hidden data-rf="predicted_total_ms">4640</span><span hidden data-rf="total_ms">4480</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:81.56%;bottom:89.44%"><span hidden data-rf="predicted_total_ms">13050</span><span hidden data-rf="total_ms">14310</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:45.88%;bottom:44.88%"><span hidden data-rf="predicted_total_ms">7340</span><span hidden data-rf="total_ms">7180</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:70.00%;bottom:81.13%"><span hidden data-rf="predicted_total_ms">11200</span><span hidden data-rf="total_ms">12980</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:43.13%;bottom:52.81%"><span hidden data-rf="predicted_total_ms">6900</span><span hidden data-rf="total_ms">8450</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:61.25%;bottom:72.75%"><span hidden data-rf="predicted_total_ms">9800</span><span hidden data-rf="total_ms">11640</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:77.50%;bottom:82.00%"><span hidden data-rf="predicted_total_ms">12400</span><span hidden data-rf="total_ms">13120</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:35.00%;bottom:43.88%"><span hidden data-rf="predicted_total_ms">5600</span><span hidden data-rf="total_ms">7020</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:51.88%;bottom:62.19%"><span hidden data-rf="predicted_total_ms">8300</span><span hidden data-rf="total_ms">9950</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:65.63%;bottom:63.25%"><span hidden data-rf="predicted_total_ms">10500</span><span hidden data-rf="total_ms">10120</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:88.75%;bottom:97.50%"><span hidden data-rf="predicted_total_ms">14200</span><span hidden data-rf="total_ms">15600</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:26.88%;bottom:34.25%"><span hidden data-rf="predicted_total_ms">4300</span><span hidden data-rf="total_ms">5480</span></span>
+              <span class="dot is-cold" data-rf-item="trace" style="left:38.13%;bottom:46.00%"><span hidden data-rf="predicted_total_ms">6100</span><span hidden data-rf="total_ms">7360</span></span>
+            <span class="plabel" style="left:35%;bottom:43.9%">j-7f2ea4 &middot; cold &middot; +25%</span>
+          </div>
+          <div class="plot-x">
+            <i style="left:0%"></i><span style="left:0%">0</span>
+            <i style="left:25%"></i><span style="left:25%">4 s</span>
+            <i style="left:50%"></i><span style="left:50%">8 s</span>
+            <i style="left:75%"></i><span style="left:75%">12 s</span>
+            <i style="left:100%"></i><span style="left:100%;transform:translateX(-100%)">16 s</span>
+          </div>
+        </div>
+        <div class="p-legend"><span><i class="plk" style="background:var(--t-queue)"></i>warm start</span><span><i class="plk" style="background:var(--t-load)"></i>cold start</span><span><i class="pll"></i>1:1 reference</span><span style="margin-left:auto">x predicted &middot; y measured</span></div>
+        <div class="stats">
+          <div class="stat is-head"><span class="s-l">all traces</span><span class="s-v">median |err| 9.4%</span><span class="s-n">p90 28.1% &middot; bias +6.2%, the scheduler runs optimistic</span></div>
+          <div class="stat"><span class="s-l">warm &middot; n 14</span><span class="s-v">median 4.1%</span><span class="s-n">p90 8.8% &middot; tight, no systematic direction</span></div>
+          <div class="stat"><span class="s-l">cold &middot; n 12</span><span class="s-v">median 16.8%</span><span class="s-n">p90 31.5% &middot; 9 of 12 ran longer than predicted</span></div>
+          <div class="stat"><span class="s-l">worst case</span><span class="s-v">+25.4%</span><span class="s-n">j-7f2ea4 &middot; predicted 5.60 s &middot; actual 7.02 s</span></div>
+        </div>
+      </section>
+      <section data-rf-item="accuracy_tokens">
+        <div class="pan-h"><h2>output length</h2><span class="n">n 26 &middot; last 6 h</span></div>
+        <p class="pan-d">Predicted output tokens against tokens actually generated. Length error and timing error break for different reasons, so they are never folded into one number.</p>
+        <div class="pan-p">predicted_output_tokens &rarr; output_tokens</div>
+        <div class="plot">
+          <div class="plot-y">
+            <i style="bottom:0%"></i><span style="bottom:0%">0</span>
+            <i style="bottom:25%"></i><span style="bottom:25%">300</span>
+            <i style="bottom:50%"></i><span style="bottom:50%">600</span>
+            <i style="bottom:75%"></i><span style="bottom:75%">900</span>
+            <i style="bottom:100%"></i><span style="bottom:100%">1200</span>
+          </div>
+          <div class="plot-area">
+              <i class="gx" style="left:25%"></i>
+              <i class="gx" style="left:50%"></i>
+              <i class="gx" style="left:75%"></i>
+              <i class="gx" style="left:100%"></i>
+              <i class="gy" style="bottom:25%"></i>
+              <i class="gy" style="bottom:50%"></i>
+              <i class="gy" style="bottom:75%"></i>
+              <i class="gy" style="bottom:100%"></i>
+              <svg class="plot-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="100" x2="100" y2="0" stroke="#93a3ac" stroke-width="1" vector-effect="non-scaling-stroke"></line></svg>
+            <span class="ref-l" style="left:97%;bottom:93%">1:1</span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:21.33%;bottom:20.08%"><span hidden data-rf="predicted_output_tokens">256</span><span hidden data-rf="output_tokens">241</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:42.67%;bottom:41.50%"><span hidden data-rf="predicted_output_tokens">512</span><span hidden data-rf="output_tokens">498</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:10.67%;bottom:8.00%"><span hidden data-rf="predicted_output_tokens">128</span><span hidden data-rf="output_tokens">96</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:15.00%;bottom:14.00%"><span hidden data-rf="predicted_output_tokens">180</span><span hidden data-rf="output_tokens">168</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:26.67%;bottom:28.67%"><span hidden data-rf="predicted_output_tokens">320</span><span hidden data-rf="output_tokens">344</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:42.67%;bottom:50.83%"><span hidden data-rf="predicted_output_tokens">512</span><span hidden data-rf="output_tokens">610</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:8.00%;bottom:7.00%"><span hidden data-rf="predicted_output_tokens">96</span><span hidden data-rf="output_tokens">84</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:53.33%;bottom:49.17%"><span hidden data-rf="predicted_output_tokens">640</span><span hidden data-rf="output_tokens">590</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:20.00%;bottom:73.33%"><span hidden data-rf="predicted_output_tokens">240</span><span hidden data-rf="output_tokens">880</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:33.33%;bottom:34.33%"><span hidden data-rf="predicted_output_tokens">400</span><span hidden data-rf="output_tokens">412</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:12.50%;bottom:11.00%"><span hidden data-rf="predicted_output_tokens">150</span><span hidden data-rf="output_tokens">132</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:66.67%;bottom:63.33%"><span hidden data-rf="predicted_output_tokens">800</span><span hidden data-rf="output_tokens">760</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:42.67%;bottom:25.00%"><span hidden data-rf="predicted_output_tokens">512</span><span hidden data-rf="output_tokens">300</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:5.33%;bottom:5.00%"><span hidden data-rf="predicted_output_tokens">64</span><span hidden data-rf="output_tokens">60</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:24.00%;bottom:25.08%"><span hidden data-rf="predicted_output_tokens">288</span><span hidden data-rf="output_tokens">301</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:85.33%;bottom:81.67%"><span hidden data-rf="predicted_output_tokens">1024</span><span hidden data-rf="output_tokens">980</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:16.67%;bottom:15.83%"><span hidden data-rf="predicted_output_tokens">200</span><span hidden data-rf="output_tokens">190</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:30.00%;bottom:35.00%"><span hidden data-rf="predicted_output_tokens">360</span><span hidden data-rf="output_tokens">420</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:42.67%;bottom:42.08%"><span hidden data-rf="predicted_output_tokens">512</span><span hidden data-rf="output_tokens">505</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:10.00%;bottom:9.17%"><span hidden data-rf="predicted_output_tokens">120</span><span hidden data-rf="output_tokens">110</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:37.33%;bottom:39.17%"><span hidden data-rf="predicted_output_tokens">448</span><span hidden data-rf="output_tokens">470</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:58.67%;bottom:57.50%"><span hidden data-rf="predicted_output_tokens">704</span><span hidden data-rf="output_tokens">690</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:8.00%;bottom:12.50%"><span hidden data-rf="predicted_output_tokens">96</span><span hidden data-rf="output_tokens">150</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:26.67%;bottom:23.83%"><span hidden data-rf="predicted_output_tokens">320</span><span hidden data-rf="output_tokens">286</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:48.00%;bottom:50.17%"><span hidden data-rf="predicted_output_tokens">576</span><span hidden data-rf="output_tokens">602</span></span>
+              <span class="dot is-neutral" data-rf-item="trace" style="left:13.33%;bottom:12.33%"><span hidden data-rf="predicted_output_tokens">160</span><span hidden data-rf="output_tokens">148</span></span>
+            <span class="plabel" style="left:20%;bottom:73.3%">j-7e90c1 &middot; 240 &rarr; 880 tok</span>
+          </div>
+          <div class="plot-x">
+            <i style="left:0%"></i><span style="left:0%">0</span>
+            <i style="left:25%"></i><span style="left:25%">300</span>
+            <i style="left:50%"></i><span style="left:50%">600</span>
+            <i style="left:75%"></i><span style="left:75%">900</span>
+            <i style="left:100%"></i><span style="left:100%;transform:translateX(-100%)">1200</span>
+          </div>
+        </div>
+        <div class="p-legend"><span><i class="plk" style="background:#8d9aa3"></i>completed generation</span><span><i class="pll"></i>1:1 reference</span><span style="margin-left:auto">tokens, not milliseconds</span></div>
+        <div class="stats">
+          <div class="stat is-head"><span class="s-l">all traces</span><span class="s-v">median |err| 8.9%</span><span class="s-n">p90 61.7% &middot; a long tail, not a shift</span></div>
+          <div class="stat"><span class="s-l">over-runs</span><span class="s-v">11 of 26</span><span class="s-n">generated more than predicted</span></div>
+          <div class="stat"><span class="s-l">early stops</span><span class="s-v">2 of 26</span><span class="s-n">stop sequence hit well before the estimate</span></div>
+          <div class="stat"><span class="s-l">worst case</span><span class="s-v">+267%</span><span class="s-n">j-7e90c1 &middot; predicted 240 tok &middot; actual 880 tok</span></div>
+        </div>
+      </section>
+      <section class="span2" data-rf-item="accuracy_error_dist">
+        <div class="pan-h"><h2>signed error spread</h2><span class="n">n 26 &middot; buckets of 10%</span></div>
+        <p class="pan-d">The same 26 traces, counted by how far each landed from its prediction. Left of zero the job finished early; right of zero it ran long. Cold starts pile up on the right &mdash; that is the bias, visible as shape rather than a single number.</p>
+        <div class="pan-p">(total_ms &minus; predicted_total_ms) / predicted_total_ms</div>
+        <div class="hist">
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">1</b><i class="h-cold" data-rf="cold_count" style="height:23.8px"></i><i class="h-warm h-zero" data-rf="warm_count" style="height:0.0px"></i></div>
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">3</b><i class="h-cold" data-rf="cold_count" style="height:23.8px"></i><i class="h-warm" data-rf="warm_count" style="height:47.5px"></i></div>
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">8</b><i class="h-cold" data-rf="cold_count" style="height:47.5px"></i><i class="h-warm" data-rf="warm_count" style="height:142.5px"></i></div>
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">7</b><i class="h-cold" data-rf="cold_count" style="height:47.5px"></i><i class="h-warm" data-rf="warm_count" style="height:118.8px"></i></div>
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">3</b><i class="h-cold" data-rf="cold_count" style="height:47.5px"></i><i class="h-warm" data-rf="warm_count" style="height:23.8px"></i></div>
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">3</b><i class="h-cold" data-rf="cold_count" style="height:71.3px"></i><i class="h-warm h-zero" data-rf="warm_count" style="height:0.0px"></i></div>
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">1</b><i class="h-cold" data-rf="cold_count" style="height:23.8px"></i><i class="h-warm h-zero" data-rf="warm_count" style="height:0.0px"></i></div>
+        </div>
+        <div class="hx">
+          <span data-rf="bucket_label">-30% &hellip; -20%</span>
+          <span data-rf="bucket_label">-20% &hellip; -10%</span>
+          <span data-rf="bucket_label">-10% &hellip; 0%</span>
+          <span data-rf="bucket_label">0% &hellip; +10%</span>
+          <span data-rf="bucket_label">+10% &hellip; +20%</span>
+          <span data-rf="bucket_label">+20% &hellip; +30%</span>
+          <span data-rf="bucket_label">+30% &hellip; +40%</span>
+        </div>
+        <div class="p-legend" style="margin-top:14px"><span><i class="plk" style="background:var(--t-queue)"></i>warm &middot; 14</span><span><i class="plk" style="background:var(--t-load)"></i>cold &middot; 12</span><span style="margin-left:auto">median +6.1% &middot; p90 +28.1% &middot; 8 of 26 finished early</span></div>
+      </section>
+      <section data-rf-item="accuracy_by_node">
+        <div class="pan-h"><h2>error by node</h2><span class="n">median |err| &middot; warm vs cold</span></div>
+        <p class="pan-d">Each node scored twice: once for jobs that found the model resident, once for jobs that had to load it. The gap is the price of a cold start on that machine.</p>
+        <div class="pan-p">median |total_ms &minus; predicted_total_ms| / predicted_total_ms</div>
+        <div class="dumb">
+          <div class="drow" data-rf-item="node_error">
+            <span class="dname" data-rf="node_id">desktop-01</span>
+            <div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dlink" style="left:12.67%;width:48.00%"></span><span class="dpt is-warm" data-rf="warm_median" style="left:12.67%"></span><span class="dpt is-cold" data-rf="cold_median" style="left:60.67%"></span></div>
+            <span class="dval"><span class="warm">3.8%</span> warm &middot; <b>5</b><br><span class="cold">18.2%</span> cold &middot; <b>4</b></span>
+          </div>
+          <div class="drow" data-rf-item="node_error">
+            <span class="dname" data-rf="node_id">jetson-01</span>
+            <div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dlink" style="left:15.33%;width:27.67%"></span><span class="dpt is-warm" data-rf="warm_median" style="left:15.33%"></span><span class="dpt is-cold" data-rf="cold_median" style="left:43.00%"></span></div>
+            <span class="dval"><span class="warm">4.6%</span> warm &middot; <b>6</b><br><span class="cold">12.9%</span> cold &middot; <b>2</b></span>
+          </div>
+          <div class="drow" data-rf-item="node_error">
+            <span class="dname" data-rf="node_id">mini-01</span>
+            <div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dlink" style="left:10.33%;width:61.00%"></span><span class="dpt is-warm" data-rf="warm_median" style="left:10.33%"></span><span class="dpt is-cold" data-rf="cold_median" style="left:71.33%"></span></div>
+            <span class="dval"><span class="warm">3.1%</span> warm &middot; <b>3</b><br><span class="cold">21.4%</span> cold &middot; <b>3</b></span>
+          </div>
+          <div class="drow" data-rf-item="node_error">
+            <span class="dname" data-rf="node_id">laptop-01</span>
+            <div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dpt is-cold" data-rf="cold_median" style="left:82.00%"></span></div>
+            <span class="dval"><span class="cold">24.6%</span> cold &middot; <b>3</b></span>
+            <span class="dnote">no warm traces &mdash; this engine never reports residency, so every job here is scored cold</span>
+          </div>
+          <div class="drow" data-rf-item="node_error"><span class="dname" data-rf="node_id">nuc-01</span><div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dpt is-none" style="left:0"></span></div><span class="dval is-unknown" data-rf="median_err">no data</span><span class="dnote">no traces in this window &mdash; engine has been down 3 min 12 s</span></div>
+        </div>
+        <div class="dax"><span>0</span><span>10%</span><span>20%</span><span>30%</span></div>
+      </section>
+      <section data-rf-item="accuracy_drift">
+        <div class="pan-h"><h2>calibration drift</h2><span class="n">rolling median &middot; 30 min steps</span></div>
+        <p class="pan-d">Warm error stays flat near 4%. Cold error climbs through the window: the same models take longer to load as the page cache fills with other work, and the estimator follows it with a lag.</p>
+        <div class="pan-p">rolling median |err| &middot; shaded band is the cold 1&sigma; spread</div>
+        <div class="tl-wrap">
+          <div class="tl">
+            <i class="gy" style="bottom:0.00%"></i><span class="tl-y" style="bottom:0.00%">0%</span>
+            <i class="gy" style="bottom:25.00%"></i><span class="tl-y" style="bottom:25.00%">6%</span>
+            <i class="gy" style="bottom:50.00%"></i><span class="tl-y" style="bottom:50.00%">12%</span>
+            <i class="gy" style="bottom:75.00%"></i><span class="tl-y" style="bottom:75.00%">18%</span>
+            <i class="gy" style="bottom:100.00%"></i><span class="tl-y" style="bottom:100.00%">24%</span>
+            <i class="gx" style="left:25%"></i>
+            <i class="gx" style="left:50%"></i>
+            <i class="gx" style="left:75%"></i>
+            <span class="tl-ev" style="left:63.6%"><b>eviction storm &middot; 04:41 PM</b></span>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+              <path class="band-f" d="M 0.00 29.58 L 9.09 22.50 L 18.18 15.42 L 27.27 26.25 L 36.36 10.83 L 45.45 4.58 L 54.55 18.33 L 63.64 7.92 L 72.73 1.25 L 81.82 11.25 L 90.91 17.08 L 100.00 11.25 L 100.00 48.75 L 90.91 54.58 L 81.82 48.75 L 72.73 38.75 L 63.64 45.42 L 54.55 55.83 L 45.45 42.08 L 36.36 48.33 L 27.27 63.75 L 18.18 52.92 L 9.09 60.00 L 0.00 67.08 Z"></path>
+              <path class="line-c" data-rf="cold_series" d="M 0.00 48.33 L 9.09 41.25 L 18.18 34.17 L 27.27 45.00 L 36.36 29.58 L 45.45 23.33 L 54.55 37.08 L 63.64 26.67 L 72.73 20.00 L 81.82 30.00 L 90.91 35.83 L 100.00 30.00"></path>
+              <path class="line-w" data-rf="warm_series" d="M 0.00 78.33 L 9.09 80.00 L 18.18 83.75 L 27.27 81.67 L 36.36 85.00 L 45.45 82.92 L 54.55 84.17 L 63.64 80.83 L 72.73 83.33 L 81.82 84.58 L 90.91 82.50 L 100.00 82.92"></path>
+            </svg>
+          </div>
+          <div class="tl-x"><span>11:20 AM</span><span>02:20 PM</span><span>05:04 PM</span></div>
+        </div>
+        <div class="p-legend" style="margin-top:14px"><span><i class="pll" style="background:var(--t-queue)"></i>warm rolling median</span><span><i class="pll" style="background:var(--t-load)"></i>cold rolling median</span><span style="margin-left:auto">cold error nearly doubled across the window</span></div>
+      </section>
+        </div>
+        <p class="a-note">Every view puts prediction and measurement side by side and never averages the two error kinds together. The scatters show individual traces, the spread shows the shape of the bias, the per-node view shows where cold starts are expensive, and the drift view shows the estimator losing ground as the window fills. Warm keeps the <b>t_queue</b> blue and cold the <b>t_load</b> orange used everywhere else in the console, so colour means the same thing on every screen.</p>
+        <div class="a-foot">
+          <span class="lbl">state reference &mdash; static markup, not live</span>
+          <div style="margin-top:14px">
+          <div class="empty" data-rf-item="empty_traces"><div class="empty-t">No traces yet</div><div class="empty-d">Accuracy needs finished jobs that carry both a prediction and a measurement. Nothing has completed since the scheduler started.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+<template id="rf-tpl-scatter-point">
+              <span class="dot is-warm" data-rf-item="trace" style="left:55.13%;bottom:54.50%"><span hidden data-rf="predicted_total_ms">8820</span><span hidden data-rf="total_ms">8720</span></span>
+</template>
+<template id="rf-tpl-empty-traces">
+          <div class="empty" data-rf-item="empty_traces"><div class="empty-t">No traces yet</div><div class="empty-d">Accuracy needs finished jobs that carry both a prediction and a measurement. Nothing has completed since the scheduler started.</div></div>
+</template>
+<template id="rf-tpl-node">
+      <div class="node " data-rf-item="node" data-node="desktop-01" style="left:14.24%;top:17.11%;--i:0">
+        <span class="dev"><span class="dev-lvl" style="--vram:55%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="shock" aria-hidden="true"></span><span class="shock s2" aria-hidden="true"></span><svg width="46" height="62" viewBox="0 0 46 62" aria-hidden="true"><rect x="12" y="4" width="22" height="54" rx="2"></rect><line x1="17" y1="12" x2="29" y2="12"></line><line x1="17" y1="17" x2="29" y2="17"></line><line x1="17" y1="22" x2="29" y2="22"></line><circle cx="23" cy="50" r="2.5"></circle></svg></span>
+        <span class="node-id" data-rf="id">desktop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.12</span> &middot; <span data-rf="gpu_name">RTX 4060 Laptop</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">7%</span><span data-rf="temperature_c">52&deg;</span><span data-rf="power_watts">15.7 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:55.3%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+</template>
+<script>
+(function () {
+  var canvas = document.getElementById('rf-canvas');
+  var world = document.getElementById('rf-world');
+  if (!canvas || !world) return;
+  var svg = world.querySelector('.links');
+  var VW = 1180, VH = 760;
+  var view = { x: 0, y: 0, s: 1 };
+  var fitted = false;
+  function apply() {
+    world.style.transformOrigin = '0 0';
+    world.style.margin = '0';
+    world.style.top = '0';
+    world.style.left = '0';
+    world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.s + ')';
+  }
+  function key(el) {
+    if (el.hasAttribute('data-node')) return el.getAttribute('data-node');
+    var it = el.getAttribute('data-rf-item');
+    if (it === 'hub') return 'hub';
+    if (it === 'client') return 'clients';
+    return null;
+  }
+  function points() {
+    var m = {};
+    Array.prototype.forEach.call(world.querySelectorAll('.node'), function (el) {
+      var k = key(el);
+      if (k) m[k] = { x: parseFloat(el.style.left) / 100 * VW, y: parseFloat(el.style.top) / 100 * VH };
+    });
+    return m;
+  }
+  function d(a, b) {
+    var dx = (b.x - a.x) * 0.45;
+    return 'M ' + a.x + ' ' + a.y + ' C ' + (a.x + dx) + ' ' + a.y + ', ' + (b.x - dx) + ' ' + b.y + ', ' + b.x + ' ' + b.y;
+  }
+  function relink() {
+    var m = points();
+    Array.prototype.forEach.call(svg.querySelectorAll('path'), function (p) {
+      var a = m[p.getAttribute('data-a')], b = m[p.getAttribute('data-b')];
+      if (a && b) p.setAttribute('d', d(a, b));
+    });
+  }
+  var drag = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    var n = e.target.closest('.node');
+    if (n) {
+      drag = { el: n, sx: e.clientX, sy: e.clientY, l: parseFloat(n.style.left), t: parseFloat(n.style.top), moved: false };
+      n.classList.add('is-drag');
+    } else {
+      drag = { pan: true, sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
+      canvas.classList.add('is-panning');
+    }
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    if (drag.pan) {
+      world.setAttribute('data-touched', '1');
+      view.x = drag.ox + (e.clientX - drag.sx);
+      view.y = drag.oy + (e.clientY - drag.sy);
+      apply();
+      return;
+    }
+    var box = world.getBoundingClientRect();
+    var px = (e.clientX - drag.sx) / box.width * 100;
+    var py = (e.clientY - drag.sy) / box.height * 100;
+    if (Math.abs(e.clientX - drag.sx) > 3 || Math.abs(e.clientY - drag.sy) > 3) drag.moved = true;
+    var nl = Math.min(96, Math.max(4, drag.l + px));
+    var nt = Math.min(94, Math.max(6, drag.t + py));
+    drag.el.style.left = nl.toFixed(2) + '%';
+    drag.el.style.top = nt.toFixed(2) + '%';
+    relink();
+  });
+  function end() {
+    if (!drag) return;
+    if (drag.el) drag.el.classList.remove('is-drag');
+    if (drag.moved) { world.setAttribute('data-dragged', '1'); world.setAttribute('data-touched', '1'); }
+    canvas.classList.remove('is-panning');
+    drag = null;
+  }
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var box = world.getBoundingClientRect();
+    var mx = e.clientX - box.left, my = e.clientY - box.top;
+    var ns = Math.min(1.9, Math.max(0.5, view.s * (e.deltaY < 0 ? 1.09 : 1 / 1.09)));
+    var k = ns / view.s;
+    view.x -= mx * (k - 1);
+    view.y -= my * (k - 1);
+    view.s = ns;
+    world.setAttribute('data-touched', '1');
+    apply();
+  }, { passive: false });
+  function fit() {
+    var rl = parseFloat(canvas.getAttribute('data-reserve-left') || 0);
+    var rr = parseFloat(canvas.getAttribute('data-reserve-right') || 0);
+    var cw = canvas.clientWidth, ch = canvas.clientHeight;
+    if (cw <= 0 || ch <= 0) return false;
+    var bw = Math.max(240, cw - rl - rr);
+    var s = Math.max(0.2, Math.min(bw / VW, ch / VH) * 0.92);
+    view.s = s;
+    view.x = rl + (bw - VW * s) / 2;
+    view.y = (ch - VH * s) / 2;
+    apply();
+    fitted = true;
+    return true;
+  }
+  var ro = null;
+  function refit() {
+    if (world.getAttribute('data-touched')) { if (ro) { ro.disconnect(); ro = null; } return; }
+    fit();
+  }
+  if (typeof ResizeObserver === 'function') {
+    ro = new ResizeObserver(refit);
+    ro.observe(canvas);
+  }
+  refit();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refit);
+  window.addEventListener('load', refit);
+  window.addEventListener('resize', refit);
+  requestAnimationFrame(refit);
+  function refit() {
+    if (world.getAttribute('data-touched')) return;
+    fit();
+  }
+  if (!fit()) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refit);
+    requestAnimationFrame(refit);
+    window.addEventListener('load', refit);
+  }
+  if (typeof ResizeObserver === 'function') { new ResizeObserver(refit).observe(canvas); }
+  var reset = document.getElementById('rf-view-reset');
+  if (reset) {
+    reset.addEventListener('click', function () {
+      fit();
+    });
+  }
+})();
+</script>
+<script>
+(function () {
+  var canvas = document.getElementById('rf-canvas');
+  if (!canvas) return;
+  var links = canvas.querySelectorAll('[data-rf-link]');
+  var nodes = canvas.querySelectorAll('.node');
+  function setFocus(id) {
+    canvas.classList.toggle('is-focusing', !!id);
+    Array.prototype.forEach.call(nodes, function (n) {
+      var k = n.getAttribute('data-node') || (n.getAttribute('data-rf-item') === 'hub' ? 'hub' : 'clients');
+      n.classList.toggle('is-focus', !!id && (k === id || k === 'hub' || k === 'clients'));
+    });
+    Array.prototype.forEach.call(canvas.querySelectorAll('.link,.link-glow,.link-flow'), function (p) {
+      var rf = p.getAttribute('data-rf-link');
+      p.classList.toggle('is-focus', !!id && (rf === id || rf === 'client'));
+    });
+  }
+  canvas.addEventListener('pointerover', function (e) {
+    var n = e.target.closest('.node[data-node]');
+    if (n) setFocus(n.getAttribute('data-node'));
+  });
+  canvas.addEventListener('pointerout', function (e) {
+    if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('.node[data-node]')) setFocus(null);
+  });
+  var order = [];
+  Array.prototype.forEach.call(canvas.querySelectorAll('.node[data-node]'), function (n) { order.push(n); });
+  var cur = -1;
+  document.addEventListener('keydown', function (e) {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    var d = 0;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') d = 1;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') d = -1;
+    if (!d) return;
+    e.preventDefault();
+    cur = (cur + d + order.length) % order.length;
+    var n = order[cur];
+    setFocus(n.getAttribute('data-node'));
+    n.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  var map = document.getElementById('rf-minimap');
+  if (map) {
+    var sync = function () {
+      Array.prototype.forEach.call(map.querySelectorAll('i'), function (dot) {
+        var k = dot.getAttribute('data-for');
+        var src = canvas.querySelector(k === 'hub' ? '[data-rf-item="hub"]' : (k === 'clients' ? '[data-rf-item="client"]' : '[data-node="' + k + '"]'));
+        if (!src) return;
+        dot.style.left = src.style.left;
+        dot.style.top = src.style.top;
+      });
+    };
+    sync();
+    canvas.addEventListener('pointermove', sync);
+  }
+  function count(el) {
+    var txt = el.firstChild;
+    if (!txt || txt.nodeType !== 3) return;
+    var raw = txt.nodeValue.trim();
+    var m = raw.match(/^(\d+(?:\.\d+)?)(.*)$/);
+    if (!m) return;
+    var end = parseFloat(m[1]), dec = (m[1].split('.')[1] || '').length, tail = m[2];
+    var t0 = null, dur = 780;
+    function step(ts) {
+      if (!t0) t0 = ts;
+      var k = Math.min(1, (ts - t0) / dur);
+      var e = 1 - Math.pow(1 - k, 3);
+      txt.nodeValue = (end * e).toFixed(dec) + tail;
+      if (k < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.tel-v, .tt, .node-tel span, .s-v'), count);
+})();
+</script>
+<script src="rf-bind.js"></script>
+</body>
+</html>

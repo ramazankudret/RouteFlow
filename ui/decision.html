@@ -1,0 +1,1210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>RouteFlow &mdash; decision</title>
+<style>
+:root{
+  --void:#05070a; --void-2:#0a0e13; --void-3:#101720;
+  --hair:#18202a; --hair-2:#26313d;
+  --fg:#e6efe9; --fg-2:#93a3ac; --fg-3:#5b6971;
+  --live:#33e07a; --live-2:#1d7d47; --cold:#d95926; --idle:#4a545e; --alert:#d55181;
+  --t-queue:#3987e5; --t-load:#d95926; --t-prefill:#199e70; --t-decode:#c98500; --t-evict:#d55181;
+  --f-mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --f-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Ubuntu,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --fs-0:9px; --fs-1:10px; --fs-2:11px; --fs-3:12px; --fs-4:14px; --fs-5:17px; --fs-6:22px; --fs-7:30px;
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:22px; --s-6:32px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--void);color:var(--fg);font:var(--fs-3)/1.5 var(--f-ui);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;background:radial-gradient(1100px 620px at 44% 42%,#0c141d 0%,#05070a 72%);z-index:0}
+a{color:var(--live);text-decoration:none}
+a:hover{color:#6ff0a4}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono)}
+.lbl{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--fg-3)}
+.dim{color:var(--fg-3)}
+
+.top{position:relative;z-index:5;display:flex;align-items:center;gap:var(--s-6);height:52px;padding:0 var(--s-5);border-bottom:1px solid var(--hair)}
+.brand{font:600 var(--fs-3)/1 var(--f-mono);letter-spacing:.28em;text-transform:uppercase}
+.brand em{font-style:normal;color:var(--live);text-shadow:0 0 10px rgba(51,224,122,.7)}
+.modes{display:flex;gap:var(--s-5)}
+.modes a{font:600 var(--fs-1)/1 var(--f-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--fg-3);padding:6px 0;border-bottom:1px solid transparent}
+.modes a:hover{color:var(--fg-2)}
+.modes a.is-active{color:var(--fg);border-bottom-color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.45)}
+.top-r{margin-left:auto;display:flex;gap:var(--s-5);font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.06em}
+.top-r b{color:var(--fg-2);font-weight:600}
+.top-r .live{color:var(--live)}
+
+.stage{position:relative;z-index:1;height:calc(100vh - 52px);min-height:680px}
+.canvas{position:absolute;inset:0}
+.canvas.is-dim{opacity:.5}
+.links{position:absolute;inset:0;width:100%;height:100%}
+.link{fill:none;stroke-width:1.4;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.link.is-warm{stroke:var(--live);opacity:.75;animation:rf-pulse 3.8s ease-in-out infinite}
+.link.is-cold{stroke:var(--cold);opacity:.7;animation:rf-pulse 4.6s ease-in-out infinite}
+.link.is-unknown{stroke:var(--idle);opacity:.5}
+.link.is-offline{stroke:#2a3138;opacity:.6;stroke-dasharray:2 7}
+.link-glow{fill:none;stroke-width:6;stroke-linecap:round;vector-effect:non-scaling-stroke;filter:blur(4px)}
+.link-glow.is-warm{stroke:var(--live);opacity:.22;animation:rf-pulse 3.8s ease-in-out infinite}
+.link-glow.is-cold{stroke:var(--cold);opacity:.18;animation:rf-pulse 4.6s ease-in-out infinite}
+.link-glow.is-unknown,.link-glow.is-offline{stroke:none}
+@keyframes rf-pulse{0%,100%{opacity:.42}50%{opacity:.95}}
+@keyframes rf-breathe{0%,100%{filter:drop-shadow(0 0 6px currentColor) drop-shadow(0 0 15px currentColor)}50%{filter:drop-shadow(0 0 9px currentColor) drop-shadow(0 0 26px currentColor)}}
+
+.node{position:absolute;transform:translate(-50%,-50%);width:184px;display:grid;justify-items:center;gap:8px;cursor:pointer;text-align:center}
+.dev{color:var(--live);animation:rf-breathe 5.2s ease-in-out infinite}
+.dev svg{display:block;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linejoin:round}
+.node.is-offline .dev{color:#39434b;animation:none;filter:none}
+.node.is-unknown .dev{color:var(--idle);animation:none;filter:drop-shadow(0 0 5px currentColor)}
+.node.is-hub .dev{color:#8ef0b6}
+.node-id{font:600 var(--fs-2)/1 var(--f-mono);letter-spacing:.18em;text-transform:uppercase}
+.node.is-offline .node-id{color:var(--fg-3)}
+.node-sub{font:var(--fs-0)/1.5 var(--f-mono);color:var(--fg-3);letter-spacing:.08em}
+.node-tel{display:flex;gap:var(--s-3);font:var(--fs-0)/1 var(--f-mono);color:var(--fg-2);letter-spacing:.04em}
+.node-tel s{text-decoration:none;color:var(--fg-3)}
+.node-vram{width:132px;height:3px;background:#121a21;position:relative}
+.node-vram i{position:absolute;top:0;bottom:0;left:0}
+.node-vram .vr-used{background:#2a3540}
+.node-vram .vr-res{background:var(--live);box-shadow:0 0 7px var(--live)}
+.node-vram .vr-res.is-zero{display:none}
+.shelf{display:grid;gap:3px;justify-items:center;margin-top:2px}
+.m-res{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:var(--live);text-shadow:0 0 8px rgba(51,224,122,.55)}
+.m-disk{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:#424d56}
+.m-none{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:#4e5a63}
+.node.is-selected .node-id{color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.5)}
+.node-queue{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;color:var(--t-queue);text-shadow:0 0 8px rgba(57,135,229,.6)}
+.node-flag{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;color:var(--cold)}
+
+.panel{position:absolute;top:0;right:0;bottom:0;width:452px;padding:var(--s-5) var(--s-5) var(--s-6);border-left:1px solid var(--hair);background:rgba(5,7,10,.9);backdrop-filter:blur(12px);overflow-y:auto;z-index:3}
+.panel::-webkit-scrollbar{width:8px}
+.panel::-webkit-scrollbar-thumb{background:#1c242c}
+.p-h{display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)}
+.p-id{font:600 var(--fs-5)/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase}
+.p-gpu{font:var(--fs-2)/1.5 var(--f-mono);color:var(--fg-2)}
+.p-ip{font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.08em}
+.p-sec{margin-top:var(--s-5);padding-top:var(--s-3);border-top:1px solid var(--hair)}
+.p-sec>.lbl{display:block;margin-bottom:var(--s-3)}
+.tel{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-3) var(--s-5)}
+.tel-i{display:grid;gap:5px}
+.tel-v{font:var(--fs-5)/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.tel-v u{text-decoration:none;font-size:var(--fs-1);color:var(--fg-3)}
+.tel-v.is-unknown{color:var(--fg-3)}
+.tel-v.is-live{color:var(--live)}
+.tel-v.is-hot{color:var(--cold)}
+.bar-row{display:flex;justify-content:space-between;font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);margin-bottom:7px}
+.bar-row b{color:var(--fg-2)}
+.bar{position:relative;height:6px;background:#111820}
+.bar i{position:absolute;top:0;bottom:0;left:0}
+.bar .b-used{background:#28323c}
+.bar .b-res{background:var(--live);box-shadow:0 0 8px var(--live)}
+.bar .b-res.is-zero{display:none}
+.bar-key{display:flex;gap:var(--s-4);margin-top:9px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.06em}
+.bar-key span{display:inline-flex;align-items:center;gap:6px}
+.bk{width:8px;height:8px}
+.bk-res{background:var(--live);box-shadow:0 0 6px var(--live)}
+.bk-oth{background:#28323c}
+.bk-free{background:#111820;box-shadow:inset 0 0 0 1px #28323c}
+.mcols{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.mcol{padding-right:var(--s-4)}
+.mcol+.mcol{padding-left:var(--s-4);padding-right:0;border-left:1px solid var(--hair)}
+.mcol>.lbl{display:block;margin-bottom:var(--s-3)}
+.mcol.is-res>.lbl{color:var(--live)}
+.mi{padding:7px 0;border-bottom:1px solid #121820}
+.mi:last-child{border-bottom:0}
+.mi-n{font:var(--fs-1)/1.35 var(--f-mono);letter-spacing:.03em;word-break:break-all}
+.mcol.is-res .mi-n{color:var(--live)}
+.mcol.is-disk .mi-n{color:var(--fg-2)}
+.mi-m{font:var(--fs-0)/1.4 var(--f-mono);color:var(--fg-3);margin-top:3px;font-variant-numeric:tabular-nums}
+.p-note{font:var(--fs-1)/1.6 var(--f-mono);color:var(--fg-3);letter-spacing:.03em}
+.p-note b{color:var(--fg-2)}
+.eng{display:flex;flex-wrap:wrap;gap:var(--s-4);font:var(--fs-1)/1 var(--f-mono);letter-spacing:.06em;color:var(--fg-2)}
+.eng span{display:inline-flex;align-items:center;gap:7px}
+.led{width:7px;height:7px;border-radius:50%;background:var(--idle)}
+.led.is-on{background:var(--live);box-shadow:0 0 8px var(--live)}
+.led.is-off{background:#3a2420;box-shadow:0 0 6px rgba(217,89,38,.5)}
+.state-line{font:var(--fs-1)/1.7 var(--f-mono);color:var(--fg-3);letter-spacing:.04em}
+.state-line b{color:var(--fg-2)}
+.state-line .warn{color:var(--cold)}
+.state-line .live{color:var(--live)}
+.empty{border:1px dashed var(--hair-2);padding:var(--s-5);max-width:460px}
+.empty-t{font:600 var(--fs-3)/1.3 var(--f-mono);letter-spacing:.06em;margin-bottom:6px}
+.empty-d{font:var(--fs-1)/1.6 var(--f-mono);color:var(--fg-3)}
+.stage-note{position:absolute;left:var(--s-5);bottom:var(--s-4);z-index:2;font:var(--fs-0)/1.7 var(--f-mono);color:#3d474f;letter-spacing:.08em;max-width:420px}
+
+.overlay{position:absolute;inset:0;z-index:3;overflow-y:auto;background:rgba(5,7,10,.87);backdrop-filter:blur(8px)}
+.overlay::-webkit-scrollbar{width:9px}
+.overlay::-webkit-scrollbar-thumb{background:#1c242c}
+.ov-in{padding:var(--s-5) var(--s-6) var(--s-6);max-width:1560px}
+.tabs{display:flex;gap:var(--s-6);border-bottom:1px solid var(--hair);padding-bottom:var(--s-3)}
+.tab{appearance:none;background:none;border:0;padding:0;cursor:pointer;text-align:left;display:grid;gap:5px}
+.tab .t-id{font:600 var(--fs-1)/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--fg-3)}
+.tab .t-nm{font:var(--fs-1)/1 var(--f-mono);letter-spacing:.06em;color:#404b54}
+.tab:hover .t-id{color:var(--fg-2)}
+.tab.is-active .t-id{color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.45)}
+.tab.is-active .t-nm{color:var(--fg-2)}
+.dhead{display:flex;gap:var(--s-6);align-items:flex-start;padding:var(--s-5) 0 var(--s-4);border-bottom:1px solid var(--hair)}
+.dh-model{font:600 var(--fs-6)/1.1 var(--f-mono);letter-spacing:.02em}
+.dh-meta{display:flex;flex-wrap:wrap;gap:var(--s-4);margin-top:9px;font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.05em}
+.dh-meta b{color:var(--fg-2);font-weight:400}
+.dh-r{margin-left:auto;text-align:right;min-width:400px}
+.dh-by{font:600 var(--fs-5)/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;margin-top:7px}
+.dh-by.is-within-noise{color:var(--fg);text-shadow:none}
+.dh-v{margin-top:9px;font:var(--fs-1)/1.7 var(--f-mono);color:var(--fg-3);letter-spacing:.04em}
+.dh-v b{color:var(--fg-2)}
+.thesis{padding:var(--s-4) 0;font:var(--fs-4)/1.6 var(--f-ui);color:var(--fg-2);max-width:104ch;border-bottom:1px solid var(--hair)}
+.thesis b{color:var(--fg);font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:var(--s-5);align-items:center;padding:var(--s-3) 0;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.08em;border-bottom:1px solid var(--hair)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.lk{width:10px;height:10px;flex:0 0 auto}
+.lw{width:26px;height:9px;border-left:1px solid var(--fg-3);border-right:1px solid var(--fg-3);position:relative;flex:0 0 auto}
+.lw:after{content:"";position:absolute;left:0;right:0;top:4px;height:1px;background:var(--fg-3)}
+.lg{width:1px;height:13px;background:var(--live);box-shadow:0 0 6px var(--live);flex:0 0 auto}
+.crow{display:grid;grid-template-columns:296px 1fr 140px;gap:var(--s-5);padding:var(--s-4) 0;border-bottom:1px solid #0f151c;align-items:start}
+.crow.is-axis{padding:var(--s-3) 0 6px}
+.crow.is-winner{background:linear-gradient(90deg,rgba(51,224,122,.06),rgba(51,224,122,0) 62%)}
+.crow.is-rejected .cid,.crow.is-rejected .ctotal{opacity:.7}
+.cnode{display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap}
+.cid-id{font:600 var(--fs-4)/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase}
+.crow.is-winner .cid-id{color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.4)}
+.tagw{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase}
+.tagw.is-warm{color:var(--live)}
+.tagw.is-cold{color:var(--cold)}
+.tagw.is-unknown{color:var(--idle)}
+.tagw.is-rejected{color:var(--fg-3)}
+.cgpu{font:var(--fs-0)/1.6 var(--f-mono);color:var(--fg-3);margin:7px 0 8px;letter-spacing:.05em}
+.cstate{display:flex;flex-wrap:wrap;gap:var(--s-3);font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.04em}
+.cstate b{color:var(--fg-2);font-weight:400;font-variant-numeric:tabular-nums}
+.cconf{margin-top:9px;font:var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--fg-3)}
+.cconf .is-converged{color:var(--live)}
+.cconf .is-learning{color:var(--fg-2)}
+.cconf .is-seeded{color:var(--idle)}
+.track{position:relative;height:24px}
+.track-grid{position:absolute;inset:0}
+.track-grid i{position:absolute;top:-4px;bottom:-4px;width:1px;background:#141c24}
+.guide{position:absolute;top:-8px;bottom:-20px;width:1px;background:var(--live);opacity:.55;box-shadow:0 0 8px var(--live)}
+.bar{position:absolute;inset:0;display:flex;gap:2px}
+.seg{display:block;height:100%}
+.seg.is-zero{display:none}
+.seg-t_queue{background:var(--t-queue)}
+.seg-t_load{background:var(--t-load)}
+.seg-t_prefill{background:var(--t-prefill)}
+.seg-t_decode{background:var(--t-decode)}
+.seg-t_evict{background:var(--t-evict)}
+.whisk{position:relative;height:15px;margin-top:4px}
+.band{position:absolute;top:6px;height:1px;background:var(--fg-3)}
+.band:before,.band:after{content:"";position:absolute;top:-4px;height:9px;width:1px;background:var(--fg-3)}
+.band:before{left:0}
+.band:after{right:0}
+.mark{position:absolute;top:0;width:1px;height:13px;background:var(--fg)}
+.terms{display:flex;flex-wrap:wrap;gap:var(--s-5);margin-top:9px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-2);letter-spacing:.05em}
+.term{display:inline-flex;align-items:center;gap:7px}
+.term i{width:8px;height:8px;flex:0 0 auto}
+.term b{color:var(--fg);font-variant-numeric:tabular-nums}
+.term.is-zero,.term.is-zero b{color:#414c55}
+.term.is-zero i{opacity:.3}
+.term.is-omitted,.term.is-omitted b{color:var(--fg-3)}
+.term.is-omitted i{background:transparent;box-shadow:inset 0 0 0 1px var(--fg-3)}
+.evict{margin-top:11px;font:var(--fs-0)/1.7 var(--f-mono);color:#e2a1b8;letter-spacing:.05em;border-left:1px solid var(--t-evict);padding-left:11px}
+.evict b{color:#f6cddc}
+.noest{font:var(--fs-0)/1.8 var(--f-mono);color:var(--fg-3);letter-spacing:.05em;padding:5px 0 0}
+.noest b{color:var(--cold);letter-spacing:.12em;text-transform:uppercase}
+.ctotal{text-align:right}
+.tt{font:600 var(--fs-7)/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.crow.is-winner .tt{color:var(--live);text-shadow:0 0 16px rgba(51,224,122,.35)}
+.crow.is-rejected .tt{font:var(--fs-6)/1 var(--f-mono);color:var(--fg-3)}
+.ts{font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);margin-top:7px;letter-spacing:.06em}
+.axis{position:relative;height:20px}
+.axis i{position:absolute;top:0;width:1px;height:5px;background:var(--hair-2)}
+.axis span{position:absolute;top:9px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:.06em}
+.d-foot{margin-top:var(--s-5);padding-top:var(--s-3);border-top:1px solid var(--hair)}
+
+
+.canvas{cursor:grab;touch-action:none;overflow:hidden}
+.canvas.is-panning{cursor:grabbing}
+.node{touch-action:none}
+.node:hover .dev{color:#7bf0ad}
+.node.is-drag{z-index:9}
+.node.is-drag .dev{animation:none;filter:drop-shadow(0 0 12px currentColor) drop-shadow(0 0 34px currentColor)}
+.node.is-hub:before{content:"";position:absolute;left:50%;top:16px;width:340px;height:340px;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(51,224,122,.12),rgba(51,224,122,0) 68%);pointer-events:none;z-index:-1}
+.link-flow{fill:none;stroke:var(--live);stroke-width:2.2;stroke-linecap:round;vector-effect:non-scaling-stroke;stroke-dasharray:1 22;opacity:.9;filter:drop-shadow(0 0 5px var(--live));animation:rf-flow 2.6s linear infinite}
+.link-flow.is-mute{opacity:0}
+@keyframes rf-flow{from{stroke-dashoffset:46}to{stroke-dashoffset:0}}
+.view-hint{position:absolute;right:var(--s-4);bottom:var(--s-4);z-index:2;display:flex;gap:var(--s-4);align-items:center;font:var(--fs-0)/1 var(--f-mono);color:#3d474f;letter-spacing:.1em}
+.view-reset{appearance:none;background:none;border:1px solid var(--hair-2);color:var(--fg-3);font:var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;padding:6px 9px;cursor:pointer}
+.view-reset:hover{color:var(--live);border-color:var(--live-2)}
+
+.canvas{overflow:hidden}
+
+
+
+.dev{position:relative;display:grid;place-items:center;padding:5px}
+.dev svg{position:relative;z-index:2}
+.dev-lvl{position:absolute;left:9px;right:9px;bottom:7px;z-index:1;height:var(--vram,0%);border-radius:2px;background:linear-gradient(180deg,rgba(51,224,122,.4),rgba(51,224,122,.05));border-top:1px solid rgba(51,224,122,.85);box-shadow:0 0 14px rgba(51,224,122,.4);animation:rf-lvl 5.4s ease-in-out infinite}
+.dev-lvl.is-zero{display:none}
+@keyframes rf-lvl{0%,100%{opacity:.75;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
+.heat{position:absolute;top:50%;left:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;border:1px solid currentColor;opacity:.4;pointer-events:none;animation:rf-heat var(--heat-ms,4s) ease-in-out infinite}
+.heat.is-hot{width:92px;height:92px;margin:-46px 0 0 -46px;opacity:.6}
+@keyframes rf-heat{0%,100%{transform:scale(.92);opacity:.28}50%{transform:scale(1.06);opacity:.7}}
+.shock{position:absolute;top:50%;left:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;border:1px solid var(--t-evict);pointer-events:none;opacity:0;animation:rf-shock 7s ease-out infinite}
+.shock.s2{animation-delay:.35s}
+@keyframes rf-shock{0%{transform:scale(.5);opacity:0}6%{opacity:.85}34%{transform:scale(3.1);opacity:0}100%{transform:scale(3.1);opacity:0}}
+.spark{position:absolute;width:3px;height:3px;border-radius:50%;background:#d95926;box-shadow:0 0 8px #d95926;pointer-events:none;animation:rf-spark 1.7s steps(1,end) infinite}
+.spark.s1{top:6px;left:-6px}
+.spark.s2{top:16px;left:-13px;animation-delay:.55s}
+@keyframes rf-spark{0%,42%{opacity:0}46%{opacity:1}52%{opacity:.2}58%{opacity:.9}70%,100%{opacity:0}}
+.canvas.is-focusing .node:not(.is-focus){opacity:.28}
+.canvas.is-focusing .link:not(.is-focus),.canvas.is-focusing .link-glow:not(.is-focus),.canvas.is-focusing .link-flow:not(.is-focus){opacity:.08}
+.canvas.is-focusing .link.is-focus{stroke-width:3;filter:drop-shadow(0 0 7px currentColor)}
+.node,.link,.link-glow,.link-flow{transition:opacity .22s ease}
+.minimap{position:absolute;right:var(--s-4);bottom:var(--s-4);z-index:7;width:196px;height:104px;border:1px solid var(--hair-2);background:rgba(5,7,10,.92)}
+.minimap i{position:absolute;width:5px;height:5px;border-radius:50%;transform:translate(-50%,-50%);background:var(--idle)}
+.minimap i.is-warm{background:var(--live);box-shadow:0 0 5px var(--live)}
+.minimap i.is-offline{background:#3a2420}
+.minimap i.is-hub{width:7px;height:7px;background:#8ef0b6;box-shadow:0 0 7px var(--live)}
+.minimap b{position:absolute;left:6px;top:5px;font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.12em;color:#39434b;font-weight:400}
+.boot{position:absolute;inset:0;z-index:6;pointer-events:none;background:linear-gradient(90deg,rgba(5,7,10,0) 0%,rgba(51,224,122,.11) 46%,rgba(51,224,122,.5) 50%,rgba(51,224,122,.11) 54%,rgba(5,7,10,0) 100%);animation:rf-boot 1.15s ease-out 1 forwards}
+@keyframes rf-boot{from{transform:translateX(-100%)}to{transform:translateX(100%);opacity:0}}
+.node{animation:rf-in .5s ease-out both;animation-delay:calc(var(--i,0)*.09s + .12s)}
+@keyframes rf-in{from{opacity:0;transform:translate(-50%,-46%)}to{opacity:1;transform:translate(-50%,-50%)}}
+.node.is-drag,.node.is-mute{animation:none}
+.links{animation:rf-fade .9s ease-out .5s both}
+@keyframes rf-fade{from{opacity:0}to{opacity:1}}
+
+.dev{display:inline-grid;width:-moz-fit-content;width:fit-content;justify-self:center}
+.stage:has(.canvas[data-reserve-right]) .minimap{right:468px}
+.stage:has(.canvas[data-reserve-right]) .view-hint{right:468px}
+
+.band{height:9px;top:2px;background:repeating-linear-gradient(90deg,rgba(147,163,172,.85) 0 1px,rgba(147,163,172,0) 1px 4px);border-left:1px solid var(--fg-3);border-right:1px solid var(--fg-3)}
+.band:before,.band:after{display:none}
+.crow.is-winner{position:relative;overflow:hidden}
+.crow.is-winner:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(51,224,122,.055) 0 1px,rgba(51,224,122,0) 1px 4px);animation:rf-scan 5.5s linear infinite}
+@keyframes rf-scan{from{background-position-y:0}to{background-position-y:40px}}
+.bar .seg{transform-origin:left center;transform:scaleX(0);animation:rf-grow .62s cubic-bezier(.2,.75,.25,1) forwards}
+.dpanel .crow:nth-of-type(3) .seg{animation-delay:.42s}
+.dpanel .crow:nth-of-type(2) .seg{animation-delay:.1s}
+@keyframes rf-grow{to{transform:scaleX(1)}}
+.mark,.band{animation:rf-fadein .5s ease-out .78s both}
+@keyframes rf-fadein{from{opacity:0}to{opacity:1}}
+.hints{position:absolute;inset:0;z-index:6;pointer-events:none;width:100%;height:100%}
+.hint-l{fill:none;stroke:var(--live);stroke-width:1;stroke-dasharray:3 5;opacity:.5;vector-effect:non-scaling-stroke}
+.hint-l.is-alt{stroke:var(--fg-3);opacity:.4}
+.hint-d{fill:var(--live);opacity:.8}
+.hint-d.is-alt{fill:var(--fg-3);opacity:.5}
+.crow[data-node]{cursor:default}
+
+.world{position:absolute;top:0;left:0;width:1180px;height:760px;margin:0;transform-origin:0 0;transform:translate(var(--rf-x,0px),var(--rf-y,0px)) scale(var(--rf-s,.8));background-image:radial-gradient(#111d27 1px,transparent 1px);background-size:46px 46px}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Route<em>Flow</em></span>
+  <nav class="modes">
+    <a href="cluster.html">cluster</a>
+    <a href="jobs.html">jobs</a>
+    <a href="decision.html" class="is-active">decision</a>
+    <a href="accuracy.html">accuracy</a>
+  </nav>
+  <div class="top-r">
+    <span>nodes <b data-rf="nodes_total">0</b></span><span>engines <b data-rf="engines_up">0</b> up</span><span>warm <b class="live" data-rf="warm_total">0</b></span><span>inflight <b data-rf="inflight_total">0</b></span><span>tick <b class="num">1.0 s</b></span>
+  </div>
+</header>
+<div class="stage">
+    <div class="canvas is-dim" id="rf-canvas">
+      <div class="world" id="rf-world" style="transform:translate(214px,28px) scale(0.857)">
+      <span class="boot" aria-hidden="true"></span>
+      <svg class="links" viewBox="0 0 1180 760" preserveAspectRatio="none" aria-hidden="true">
+        <path class="link-glow is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link-glow is-warm" data-rf-link="desktop-01" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link-glow is-warm" data-rf-link="jetson-01" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link-glow is-unknown" data-rf-link="laptop-01" data-a="hub" data-b="laptop-01" d="M 368 366 C 292.4 366, 275.6 596, 200 596"></path>
+        <path class="link-glow is-offline" data-rf-link="nuc-01" data-a="hub" data-b="nuc-01" d="M 368 366 C 493.1 366, 520.9 580, 646 580"></path>
+        <path class="link-glow is-warm" data-rf-link="mini-01" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+        <path class="link is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link is-warm" data-rf-link="desktop-01" style="stroke-width:2.1" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link is-warm" data-rf-link="jetson-01" style="stroke-width:1.2" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link is-unknown" data-rf-link="laptop-01" style="stroke-width:1.4" data-a="hub" data-b="laptop-01" d="M 368 366 C 292.4 366, 275.6 596, 200 596"></path>
+        <path class="link is-offline" data-rf-link="nuc-01" style="stroke-width:1.4" data-a="hub" data-b="nuc-01" d="M 368 366 C 493.1 366, 520.9 580, 646 580"></path>
+        <path class="link is-warm" data-rf-link="mini-01" style="stroke-width:2" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+        <path class="link-flow is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link-flow is-warm" data-rf-link="desktop-01" style="animation-duration:3.4s" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link-flow is-warm" data-rf-link="jetson-01" style="animation-duration:1.3s" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link-flow is-warm" data-rf-link="mini-01" style="animation-duration:2.4s" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+      </svg>
+      <div class="node" data-rf-item="client" style="left:7.46%;top:48.16%">
+        <span class="dev"><svg width="34" height="48" viewBox="0 0 34 48" aria-hidden="true"><rect x="9" y="5" width="17" height="38" rx="3"></rect><line x1="14" y1="10" x2="21" y2="10"></line><circle cx="17.5" cy="38" r="1.4"></circle></svg></span>
+        <span class="node-id">clients</span>
+        <span class="node-sub">3 apps · openai-compatible</span>
+      </div>
+      <div class="node is-hub" data-rf-item="hub" style="left:31.19%;top:48.16%">
+        <span class="dev"><svg width="56" height="46" viewBox="0 0 56 46" aria-hidden="true"><rect x="8" y="24" width="40" height="13" rx="6.5"></rect><line x1="18" y1="24" x2="13" y2="8"></line><line x1="38" y1="24" x2="43" y2="8"></line><circle cx="19" cy="30.5" r="1.6"></circle><circle cx="28" cy="30.5" r="1.6"></circle><circle cx="37" cy="30.5" r="1.6"></circle></svg></span>
+        <span class="node-id">routeflow</span>
+        <span class="node-sub">localhost:11500 · scheduler</span>
+        <span class="node-tel"><span>5 nodes</span><span>4 up</span><span>3 warm</span></span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="desktop-01" style="left:14.24%;top:17.11%;--i:0">
+        <span class="dev"><span class="dev-lvl" style="--vram:55%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="shock" aria-hidden="true"></span><span class="shock s2" aria-hidden="true"></span><svg width="46" height="62" viewBox="0 0 46 62" aria-hidden="true"><rect x="12" y="4" width="22" height="54" rx="2"></rect><line x1="17" y1="12" x2="29" y2="12"></line><line x1="17" y1="17" x2="29" y2="17"></line><line x1="17" y1="22" x2="29" y2="22"></line><circle cx="23" cy="50" r="2.5"></circle></svg></span>
+        <span class="node-id" data-rf="id">desktop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.12</span> &middot; <span data-rf="gpu_name">RTX 4060 Laptop</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">7%</span><span data-rf="temperature_c">52&deg;</span><span data-rf="power_watts">15.7 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:55.3%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="jetson-01" style="left:50.51%;top:15.53%;--i:1">
+        <span class="dev"><span class="dev-lvl" style="--vram:42%" aria-hidden="true"></span><span class="heat is-hot" style="color:#d95926;--heat-ms:2.2s" aria-hidden="true"></span><svg width="52" height="46" viewBox="0 0 52 46" aria-hidden="true"><rect x="4" y="14" width="44" height="28" rx="2"></rect><line x1="12" y1="14" x2="12" y2="8"></line><line x1="17" y1="14" x2="17" y2="8"></line><line x1="22" y1="14" x2="22" y2="8"></line><line x1="27" y1="14" x2="27" y2="8"></line><line x1="32" y1="14" x2="32" y2="8"></line><rect x="12" y="21" width="12" height="11" rx="1"></rect><rect x="29" y="24" width="9" height="7" rx="1"></rect></svg></span>
+        <span class="node-id" data-rf="id">jetson-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.31</span> &middot; <span data-rf="gpu_name">Jetson Orin NX</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">62%</span><span data-rf="temperature_c">78&deg;</span><span data-rf="power_watts">23.6 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:63.3%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:42.0%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-res" data-rf="name">&#9679; llama3.2:3b &middot; 1.88 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">phi3.5:3.8b &middot; on disk</span>
+        </span>
+        <span class="node-queue" data-rf="inflight">queue 1 &middot; 3/2 slots</span>
+      </div>
+      <div class="node is-unknown" data-rf-item="node" data-node="laptop-01" style="left:16.95%;top:78.42%;--i:2">
+        <span class="dev"><span class="dev-lvl is-zero" style="--vram:0%" aria-hidden="true"></span><svg width="52" height="46" viewBox="0 0 52 46" aria-hidden="true"><rect x="11" y="8" width="30" height="21" rx="1.5"></rect><path d="M5 40 L47 40 L41 31 L11 31 Z"></path></svg></span>
+        <span class="node-id" data-rf="id">laptop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.44</span> &middot; <span data-rf="gpu_name">GeForce MX550 4 GB</span></span>
+        <span class="node-tel"><s data-rf="gpu_util">&mdash;</s><s data-rf="temperature_c">&mdash;</s><s data-rf="power_watts">&mdash;</s></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:25.0%"></i><i class="vr-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></span>
+        <span class="shelf">
+          <span class="m-none" data-rf="residency_known">residency unknown</span>
+          <span class="m-disk" data-rf="models_on_disk">qwen2.5:7b &middot; llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+      <div class="node is-offline" data-rf-item="node" data-node="nuc-01" style="left:54.75%;top:76.32%;--i:3">
+        <span class="dev"><span class="dev-lvl is-zero" style="--vram:0%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="spark s1" aria-hidden="true"></span><span class="spark s2" aria-hidden="true"></span><svg width="44" height="46" viewBox="0 0 44 46" aria-hidden="true"><rect x="8" y="10" width="28" height="28" rx="4"></rect><circle cx="22" cy="24" r="4.5"></circle><line x1="13" y1="33" x2="19" y2="33"></line></svg></span>
+        <span class="node-id" data-rf="id">nuc-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.57</span> &middot; <span data-rf="gpu_name">Intel Arc A770</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">0%</span><span data-rf="temperature_c">41&deg;</span><span data-rf="power_watts">9.2 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:2.5%"></i><i class="vr-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></span>
+        <span class="shelf">
+          <span class="m-none">all cold &middot; nothing resident</span>
+          <span class="m-disk" data-rf="models_on_disk">qwen2.5:7b &middot; mistral-nemo:12b &middot; on disk</span>
+        </span>
+        <span class="node-flag" data-rf="engine_healthy">engine down</span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="mini-01" style="left:64.41%;top:44.21%;--i:4">
+        <span class="dev"><span class="dev-lvl" style="--vram:14%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><svg width="52" height="40" viewBox="0 0 52 40" aria-hidden="true"><rect x="7" y="14" width="38" height="15" rx="3"></rect><circle cx="14" cy="21.5" r="1.6"></circle><line x1="30" y1="21.5" x2="39" y2="21.5"></line></svg></span>
+        <span class="node-id" data-rf="id">mini-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.68</span> &middot; <span data-rf="gpu_name">Apple M2 Pro</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">11%</span><span data-rf="temperature_c">47&deg;</span><span data-rf="power_watts">18.4 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:37.5%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:13.8%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">phi3.5:3.8b &middot; mistral-nemo:12b &middot; on disk</span>
+        </span>
+      </div>
+      </div>
+    </div>
+    <div class="minimap" id="rf-minimap" aria-hidden="true">
+      <b>node map</b>
+      <i class="" data-for="clients"></i>
+      <i class="is-hub" data-for="hub"></i>
+      <i class="is-warm" data-for="desktop-01"></i>
+      <i class="is-warm" data-for="jetson-01"></i>
+      <i class="" data-for="laptop-01"></i>
+      <i class="is-offline" data-for="nuc-01"></i>
+      <i class="is-warm" data-for="mini-01"></i>
+    </div>
+    <svg class="hints" id="rf-hints" aria-hidden="true"></svg>
+    <div class="overlay" id="rf-ov">
+      <div class="ov-in">
+      <div class="tabs" id="rf-tabs">
+        <button type="button" class="tab is-active" data-target="job-1"><span class="t-id">j-7f31c2</span><span class="t-nm">hot beats idle</span></button>
+        <button type="button" class="tab" data-target="job-2"><span class="t-id">j-7f31be</span><span class="t-nm">within noise</span></button>
+        <button type="button" class="tab" data-target="job-3"><span class="t-id">j-7f31b4</span><span class="t-nm">eviction cost</span></button>
+      </div>
+      <section class="dpanel" id="job-1" data-rf-item="decision" data-winner="jetson-01">
+        <div class="dhead">
+          <div>
+            <span class="lbl">job <span data-rf="job_id">j-7f31c2</span></span>
+            <div class="dh-model" data-rf="model">qwen2.5:7b-instruct-q4_K_M</div>
+            <div class="dh-meta"><span>role_hint <b data-rf="role_hint">planner</b></span><span>prompt <b>1842 tok</b></span><span>candidates <b data-rf="candidate_count">0</b></span><span>admitted <b data-rf="admitted_count">0</b></span></div>
+          </div>
+          <div class="dh-r">
+            <span class="lbl">decided by</span>
+            <div class="dh-by " style="color:var(--t-load)" data-rf="decided_by">t_load</div>
+            <div class="dh-v" data-rf="margin_ms">margin <b>4.23 s</b> against the largest &sigma; of <b>2.40 s</b> &mdash; the ranking survives the noise</div>
+          </div>
+        </div>
+        <p class="thesis"><b>jetson-01</b> is the slower machine per token, but the model is already in its VRAM. <b>desktop-01</b> is almost idle and would still spend <b>9.50 s</b> loading &mdash; longer than the entire jetson-01 run. Residency decides this, not raw speed.</p>
+        <div class="legend">
+          <span><i class="lk" style="background:var(--t-queue)"></i>t_queue</span>
+          <span><i class="lk" style="background:var(--t-load)"></i>t_load</span>
+          <span><i class="lk" style="background:var(--t-prefill)"></i>t_prefill</span>
+          <span><i class="lk" style="background:var(--t-decode)"></i>t_decode</span>
+          <span><i class="lk" style="background:var(--t-evict)"></i>t_evict</span>
+          <span><i class="lw"></i>1&sigma; band</span>
+          <span><i class="lg"></i>selected total</span>
+          <span style="margin-left:auto">rejected candidates get no bar &mdash; the terms were never computed, they are not zero</span>
+        </div>
+        <div class="crow is-axis">
+          <div class="lbl">candidate &amp; state at decision</div>
+          <div class="axis">
+            <i style="left:0%"></i><span style="left:0%;">0</span>
+            <i style="left:25%"></i><span style="left:25%;transform:translateX(-50%);">4.0 s</span>
+            <i style="left:50%"></i><span style="left:50%;transform:translateX(-50%);">8.0 s</span>
+            <i style="left:75%"></i><span style="left:75%;transform:translateX(-50%);">12.0 s</span>
+            <i style="left:100%"></i><span style="left:100%;transform:translateX(-100%);">16.0 s</span>
+          </div>
+          <div class="lbl" style="text-align:right">predicted total</div>
+        </div>
+        <div class="crow is-winner" data-rf-item="candidate" data-node="jetson-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">jetson-01</span><span class="tagw is-warm" data-rf="admitted">selected</span><span class="tagw is-warm" data-rf="was_resident">warm</span></div>
+            <div class="cgpu">jetson orin nx &middot; ollama &middot; 2 slots</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">5.50 GiB</b></span><span>util <b data-rf="gpu_util">62%</b></span><span>inflight <b data-rf="inflight">1 / 2</b></span></div>
+            <div class="cconf">conf <span class="is-converged" data-rf="conf">converged</span> &middot; <span data-rf="samples">214</span> samples</div>
+          </div>
+          <div class="cplot">
+            <div class="track">
+              <div class="track-grid" aria-hidden="true"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+              <div class="guide" style="left:55.13%" aria-hidden="true"></div>
+              <div class="bar">
+              <span class="seg seg-t_queue is-zero" data-rf="t_queue" style="width:0%"></span>
+              <span class="seg seg-t_load is-zero" data-rf="t_load" style="width:0%"></span>
+              <span class="seg seg-t_prefill" data-rf="t_prefill" style="width:3.88%"></span>
+              <span class="seg seg-t_decode" data-rf="t_decode" style="width:51.25%"></span>
+              <span class="seg seg-t_evict is-zero" data-rf="t_evict" style="width:0%"></span>
+              </div>
+            </div>
+            <div class="whisk">
+              <div class="band" data-rf="sigma_ms" style="left:40.13%;width:30.00%"></div>
+              <div class="mark" data-rf="predicted_total_ms" style="left:55.13%"></div>
+            </div>
+            <div class="terms">
+              <span class="term is-zero" data-rf="t_queue"><i style="background:var(--t-queue)"></i>t_queue <b>0 ms</b></span>
+              <span class="term is-zero" data-rf="t_load"><i style="background:var(--t-load)"></i>t_load <b>0 ms</b></span>
+              <span class="term " data-rf="t_prefill"><i style="background:var(--t-prefill)"></i>t_prefill <b>620 ms</b></span>
+              <span class="term " data-rf="t_decode"><i style="background:var(--t-decode)"></i>t_decode <b>8.20 s</b></span>
+              <span class="term is-zero" data-rf="t_evict"><i style="background:var(--t-evict)"></i>t_evict <b>0 ms</b></span>
+            </div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">8.82 s</div><div class="ts" data-rf="sigma_ms">&plusmn; 2.40 s &middot; 1&sigma;</div></div>
+        </div>
+        <div class="crow" data-rf-item="candidate" data-node="desktop-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">desktop-01</span><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+            <div class="cgpu">rtx 4060 laptop &middot; ollama &middot; 1 slot</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">3.25 GiB</b></span><span>util <b data-rf="gpu_util">7%</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf">conf <span class="is-learning" data-rf="conf">learning</span> &middot; <span data-rf="samples">38</span> samples</div>
+          </div>
+          <div class="cplot">
+            <div class="track">
+              <div class="track-grid" aria-hidden="true"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+              <div class="guide" style="left:55.13%" aria-hidden="true"></div>
+              <div class="bar">
+              <span class="seg seg-t_queue is-zero" data-rf="t_queue" style="width:0%"></span>
+              <span class="seg seg-t_load" data-rf="t_load" style="width:59.38%"></span>
+              <span class="seg seg-t_prefill" data-rf="t_prefill" style="width:0.94%"></span>
+              <span class="seg seg-t_decode" data-rf="t_decode" style="width:21.25%"></span>
+              <span class="seg seg-t_evict is-zero" data-rf="t_evict" style="width:0%"></span>
+              </div>
+            </div>
+            <div class="whisk">
+              <div class="band" data-rf="sigma_ms" style="left:69.69%;width:23.75%"></div>
+              <div class="mark" data-rf="predicted_total_ms" style="left:81.56%"></div>
+            </div>
+            <div class="terms">
+              <span class="term is-zero" data-rf="t_queue"><i style="background:var(--t-queue)"></i>t_queue <b>0 ms</b></span>
+              <span class="term " data-rf="t_load"><i style="background:var(--t-load)"></i>t_load <b>9.50 s</b></span>
+              <span class="term " data-rf="t_prefill"><i style="background:var(--t-prefill)"></i>t_prefill <b>150 ms</b></span>
+              <span class="term " data-rf="t_decode"><i style="background:var(--t-decode)"></i>t_decode <b>3.40 s</b></span>
+              <span class="term is-zero" data-rf="t_evict"><i style="background:var(--t-evict)"></i>t_evict <b>0 ms</b></span>
+            </div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">13.05 s</div><div class="ts" data-rf="sigma_ms">&plusmn; 1.90 s &middot; 1&sigma;</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="laptop-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">laptop-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">geforce mx550 4 gb &middot; lm-studio</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">3.00 GiB</b></span><span>util <b data-rf="gpu_util">&mdash;</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf"><span class="tagw is-unknown" data-rf="was_resident">residency unknown</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">insufficient_vram</b><br>no estimate produced &mdash; model needs 4.42 GiB resident, 3.00 GiB free</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="nuc-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">nuc-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">intel arc a770 &middot; lm-studio</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">15.60 GiB</b></span><span>util <b data-rf="gpu_util">0%</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf"><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">engine_down</b><br>no estimate produced &mdash; lm-studio unreachable for 3 min 12 s</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="mini-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">mini-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">apple m2 pro &middot; lm-studio &middot; 2 slots</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">20.00 GiB</b></span><span>util <b data-rf="gpu_util">11%</b></span><span>inflight <b data-rf="inflight">1 / 2</b></span></div>
+            <div class="cconf"><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">node_stale</b><br>no estimate produced &mdash; last telemetry 94 s ago, limit 15 s</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+      </section>
+      <section class="dpanel" id="job-2" hidden data-rf-item="decision" data-winner="desktop-01">
+        <div class="dhead">
+          <div>
+            <span class="lbl">job <span data-rf="job_id">j-7f31be</span></span>
+            <div class="dh-model" data-rf="model">llama3.2:3b-instruct-q4_K_M</div>
+            <div class="dh-meta"><span>role_hint <b data-rf="role_hint">classifier</b></span><span>prompt <b>204 tok</b></span><span>candidates <b data-rf="candidate_count">0</b></span><span>admitted <b data-rf="admitted_count">0</b></span></div>
+          </div>
+          <div class="dh-r">
+            <span class="lbl">decided by</span>
+            <div class="dh-by is-within-noise" data-rf="decided_by">&#8776; within_noise</div>
+            <div class="dh-v" data-rf="margin_ms">margin <b>250 ms</b> is smaller than the largest &sigma; of <b>610 ms</b> &mdash; desktop-01 taken on tiebreak: fewer inflight</div>
+          </div>
+        </div>
+        <p class="thesis">Both nodes hold the model, so no load cost separates them. What is left is <b>250 ms</b> against spreads of 520 and 610 ms. The scheduler still has to pick one, and it says plainly that it cannot tell them apart.</p>
+        <div class="legend">
+          <span><i class="lk" style="background:var(--t-queue)"></i>t_queue</span>
+          <span><i class="lk" style="background:var(--t-load)"></i>t_load</span>
+          <span><i class="lk" style="background:var(--t-prefill)"></i>t_prefill</span>
+          <span><i class="lk" style="background:var(--t-decode)"></i>t_decode</span>
+          <span><i class="lk" style="background:var(--t-evict)"></i>t_evict</span>
+          <span><i class="lw"></i>1&sigma; band</span>
+          <span><i class="lg"></i>selected total</span>
+          <span style="margin-left:auto">one shared axis &mdash; every candidate at the same scale</span>
+        </div>
+        <div class="crow is-axis">
+          <div class="lbl">candidate &amp; state at decision</div>
+          <div class="axis">
+            <i style="left:0%"></i><span style="left:0%;">0</span>
+            <i style="left:25%"></i><span style="left:25%;transform:translateX(-50%);">0.8 s</span>
+            <i style="left:50%"></i><span style="left:50%;transform:translateX(-50%);">1.6 s</span>
+            <i style="left:75%"></i><span style="left:75%;transform:translateX(-50%);">2.4 s</span>
+            <i style="left:100%"></i><span style="left:100%;transform:translateX(-100%);">3.2 s</span>
+          </div>
+          <div class="lbl" style="text-align:right">predicted total</div>
+        </div>
+        <div class="crow is-winner" data-rf-item="candidate" data-node="desktop-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">desktop-01</span><span class="tagw is-warm" data-rf="admitted">selected</span><span class="tagw is-warm" data-rf="was_resident">warm</span></div>
+            <div class="cgpu">rtx 4060 laptop &middot; ollama &middot; 1 slot</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">3.25 GiB</b></span><span>util <b data-rf="gpu_util">7%</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf">conf <span class="is-learning" data-rf="conf">learning</span> &middot; <span data-rf="samples">37</span> samples</div>
+          </div>
+          <div class="cplot">
+            <div class="track">
+              <div class="track-grid" aria-hidden="true"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+              <div class="guide" style="left:57.81%" aria-hidden="true"></div>
+              <div class="bar">
+              <span class="seg seg-t_queue is-zero" data-rf="t_queue" style="width:0%"></span>
+              <span class="seg seg-t_load is-zero" data-rf="t_load" style="width:0%"></span>
+              <span class="seg seg-t_prefill" data-rf="t_prefill" style="width:2.81%"></span>
+              <span class="seg seg-t_decode" data-rf="t_decode" style="width:55.00%"></span>
+              <span class="seg seg-t_evict is-zero" data-rf="t_evict" style="width:0%"></span>
+              </div>
+            </div>
+            <div class="whisk">
+              <div class="band" data-rf="sigma_ms" style="left:41.56%;width:32.50%"></div>
+              <div class="mark" data-rf="predicted_total_ms" style="left:57.81%"></div>
+            </div>
+            <div class="terms">
+              <span class="term is-zero" data-rf="t_queue"><i style="background:var(--t-queue)"></i>t_queue <b>0 ms</b></span>
+              <span class="term is-zero" data-rf="t_load"><i style="background:var(--t-load)"></i>t_load <b>0 ms</b></span>
+              <span class="term " data-rf="t_prefill"><i style="background:var(--t-prefill)"></i>t_prefill <b>90 ms</b></span>
+              <span class="term " data-rf="t_decode"><i style="background:var(--t-decode)"></i>t_decode <b>1.76 s</b></span>
+              <span class="term is-zero" data-rf="t_evict"><i style="background:var(--t-evict)"></i>t_evict <b>0 ms</b></span>
+            </div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">1.85 s</div><div class="ts" data-rf="sigma_ms">&plusmn; 0.52 s &middot; 1&sigma;</div></div>
+        </div>
+        <div class="crow" data-rf-item="candidate" data-node="jetson-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">jetson-01</span><span class="tagw is-warm" data-rf="was_resident">warm</span></div>
+            <div class="cgpu">jetson orin nx &middot; ollama &middot; 2 slots</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">5.50 GiB</b></span><span>util <b data-rf="gpu_util">62%</b></span><span>inflight <b data-rf="inflight">1 / 2</b></span></div>
+            <div class="cconf">conf <span class="is-seeded" data-rf="conf">seeded</span> &middot; <span data-rf="samples">6</span> samples</div>
+          </div>
+          <div class="cplot">
+            <div class="track">
+              <div class="track-grid" aria-hidden="true"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+              <div class="guide" style="left:57.81%" aria-hidden="true"></div>
+              <div class="bar">
+              <span class="seg seg-t_queue is-zero" data-rf="t_queue" style="width:0%"></span>
+              <span class="seg seg-t_load is-zero" data-rf="t_load" style="width:0%"></span>
+              <span class="seg seg-t_prefill" data-rf="t_prefill" style="width:6.56%"></span>
+              <span class="seg seg-t_decode" data-rf="t_decode" style="width:59.06%"></span>
+              <span class="seg seg-t_evict is-zero" data-rf="t_evict" style="width:0%"></span>
+              </div>
+            </div>
+            <div class="whisk">
+              <div class="band" data-rf="sigma_ms" style="left:46.56%;width:38.13%"></div>
+              <div class="mark" data-rf="predicted_total_ms" style="left:65.63%"></div>
+            </div>
+            <div class="terms">
+              <span class="term is-zero" data-rf="t_queue"><i style="background:var(--t-queue)"></i>t_queue <b>0 ms</b></span>
+              <span class="term is-zero" data-rf="t_load"><i style="background:var(--t-load)"></i>t_load <b>0 ms</b></span>
+              <span class="term " data-rf="t_prefill"><i style="background:var(--t-prefill)"></i>t_prefill <b>210 ms</b></span>
+              <span class="term " data-rf="t_decode"><i style="background:var(--t-decode)"></i>t_decode <b>1.89 s</b></span>
+              <span class="term is-zero" data-rf="t_evict"><i style="background:var(--t-evict)"></i>t_evict <b>0 ms</b></span>
+            </div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">2.10 s</div><div class="ts" data-rf="sigma_ms">&plusmn; 0.61 s &middot; 1&sigma;</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="laptop-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">laptop-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">geforce mx550 4 gb &middot; lm-studio</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">3.00 GiB</b></span><span>util <b data-rf="gpu_util">&mdash;</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf"><span class="tagw is-unknown" data-rf="was_resident">residency unknown</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">excluded</b><br>no estimate produced &mdash; role_hint=classifier is not routed to laptop-01</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="mini-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">mini-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">apple m2 pro &middot; lm-studio &middot; 2 slots</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">20.00 GiB</b></span><span>util <b data-rf="gpu_util">11%</b></span><span>inflight <b data-rf="inflight">1 / 2</b></span></div>
+            <div class="cconf"><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">model_missing</b><br>no estimate produced &mdash; llama3.2:3b-instruct-q4_K_M is not on disk here</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="nuc-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">nuc-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">intel arc a770 &middot; lm-studio</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">15.60 GiB</b></span><span>util <b data-rf="gpu_util">0%</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf"><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">engine_down</b><br>no estimate produced &mdash; lm-studio unreachable for 3 min 12 s</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+      </section>
+      <section class="dpanel" id="job-3" hidden data-rf-item="decision" data-winner="desktop-01">
+        <div class="dhead">
+          <div>
+            <span class="lbl">job <span data-rf="job_id">j-7f31b4</span></span>
+            <div class="dh-model" data-rf="model">qwen2.5:7b-instruct-q4_K_M</div>
+            <div class="dh-meta"><span>role_hint <b data-rf="role_hint">planner</b></span><span>prompt <b>1610 tok</b></span><span>candidates <b data-rf="candidate_count">0</b></span><span>admitted <b data-rf="admitted_count">0</b></span></div>
+          </div>
+          <div class="dh-r">
+            <span class="lbl">decided by</span>
+            <div class="dh-by " style="color:var(--t-evict)" data-rf="decided_by">t_evict</div>
+            <div class="dh-v" data-rf="margin_ms">margin <b>2.67 s</b> against the largest &sigma; of <b>1.50 s</b> &mdash; paying to evict is still cheaper than waiting</div>
+          </div>
+        </div>
+        <p class="thesis">Nothing is warm for this request. <b>desktop-01</b> must free VRAM by dropping a model used <b>40 s ago</b>, and t_evict prices what that will cost whoever wants it next. <b>jetson-01</b> holds the model but both slots are busy, so t_queue alone is 4.20 s.</p>
+        <div class="legend">
+          <span><i class="lk" style="background:var(--t-queue)"></i>t_queue</span>
+          <span><i class="lk" style="background:var(--t-load)"></i>t_load</span>
+          <span><i class="lk" style="background:var(--t-prefill)"></i>t_prefill</span>
+          <span><i class="lk" style="background:var(--t-decode)"></i>t_decode</span>
+          <span><i class="lk" style="background:var(--t-evict)"></i>t_evict</span>
+          <span><i class="lw"></i>1&sigma; band</span>
+          <span><i class="lg"></i>selected total</span>
+          <span style="margin-left:auto">one shared axis &mdash; every candidate at the same scale</span>
+        </div>
+        <div class="crow is-axis">
+          <div class="lbl">candidate &amp; state at decision</div>
+          <div class="axis">
+            <i style="left:0%"></i><span style="left:0%;">0</span>
+            <i style="left:25%"></i><span style="left:25%;transform:translateX(-50%);">3.0 s</span>
+            <i style="left:50%"></i><span style="left:50%;transform:translateX(-50%);">6.0 s</span>
+            <i style="left:75%"></i><span style="left:75%;transform:translateX(-50%);">9.0 s</span>
+            <i style="left:100%"></i><span style="left:100%;transform:translateX(-100%);">12.0 s</span>
+          </div>
+          <div class="lbl" style="text-align:right">predicted total</div>
+        </div>
+        <div class="crow is-winner" data-rf-item="candidate" data-node="desktop-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">desktop-01</span><span class="tagw is-warm" data-rf="admitted">selected</span><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+            <div class="cgpu">rtx 4060 laptop &middot; ollama &middot; 1 slot</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">3.25 GiB</b></span><span>util <b data-rf="gpu_util">7%</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf">conf <span class="is-converged" data-rf="conf">converged</span> &middot; <span data-rf="samples">96</span> samples</div>
+          </div>
+          <div class="cplot">
+            <div class="track">
+              <div class="track-grid" aria-hidden="true"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+              <div class="guide" style="left:61.17%" aria-hidden="true"></div>
+              <div class="bar">
+              <span class="seg seg-t_queue is-zero" data-rf="t_queue" style="width:0%"></span>
+              <span class="seg seg-t_load" data-rf="t_load" style="width:25.83%"></span>
+              <span class="seg seg-t_prefill" data-rf="t_prefill" style="width:2.00%"></span>
+              <span class="seg seg-t_decode" data-rf="t_decode" style="width:21.67%"></span>
+              <span class="seg seg-t_evict" data-rf="t_evict" style="width:11.67%"></span>
+              </div>
+            </div>
+            <div class="whisk">
+              <div class="band" data-rf="sigma_ms" style="left:53.00%;width:16.33%"></div>
+              <div class="mark" data-rf="predicted_total_ms" style="left:61.17%"></div>
+            </div>
+            <div class="terms">
+              <span class="term is-zero" data-rf="t_queue"><i style="background:var(--t-queue)"></i>t_queue <b>0 ms</b></span>
+              <span class="term " data-rf="t_load"><i style="background:var(--t-load)"></i>t_load <b>3.10 s</b></span>
+              <span class="term " data-rf="t_prefill"><i style="background:var(--t-prefill)"></i>t_prefill <b>240 ms</b></span>
+              <span class="term " data-rf="t_decode"><i style="background:var(--t-decode)"></i>t_decode <b>2.60 s</b></span>
+              <span class="term " data-rf="t_evict"><i style="background:var(--t-evict)"></i>t_evict <b>1.40 s</b></span>
+            </div>
+            <div class="evict" data-rf="would_evict">would evict <b>llama3.2:3b-instruct-q4_K_M</b> &middot; 1.88 GiB &middot; last used 40 s ago<br>t_evict prices what that costs the <b>next</b> request for it, not this one</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">7.34 s</div><div class="ts" data-rf="sigma_ms">&plusmn; 0.98 s &middot; 1&sigma;</div></div>
+        </div>
+        <div class="crow" data-rf-item="candidate" data-node="jetson-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">jetson-01</span><span class="tagw is-warm" data-rf="was_resident">warm</span></div>
+            <div class="cgpu">jetson orin nx &middot; ollama &middot; 2 slots</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">5.50 GiB</b></span><span>util <b data-rf="gpu_util">62%</b></span><span>inflight <b data-rf="inflight">3 / 2</b></span></div>
+            <div class="cconf">conf <span class="is-learning" data-rf="conf">learning</span> &middot; <span data-rf="samples">41</span> samples</div>
+          </div>
+          <div class="cplot">
+            <div class="track">
+              <div class="track-grid" aria-hidden="true"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+              <div class="guide" style="left:61.17%" aria-hidden="true"></div>
+              <div class="bar">
+              <span class="seg seg-t_queue" data-rf="t_queue" style="width:35.00%"></span>
+              <span class="seg seg-t_load is-zero" data-rf="t_load" style="width:0%"></span>
+              <span class="seg seg-t_prefill" data-rf="t_prefill" style="width:5.08%"></span>
+              <span class="seg seg-t_decode" data-rf="t_decode" style="width:43.33%"></span>
+              <span class="seg seg-t_evict is-zero" data-rf="t_evict" style="width:0%"></span>
+              </div>
+            </div>
+            <div class="whisk">
+              <div class="band" data-rf="sigma_ms" style="left:70.92%;width:25.00%"></div>
+              <div class="mark" data-rf="predicted_total_ms" style="left:83.42%"></div>
+            </div>
+            <div class="terms">
+              <span class="term " data-rf="t_queue"><i style="background:var(--t-queue)"></i>t_queue <b>4.20 s</b></span>
+              <span class="term is-zero" data-rf="t_load"><i style="background:var(--t-load)"></i>t_load <b>0 ms</b></span>
+              <span class="term " data-rf="t_prefill"><i style="background:var(--t-prefill)"></i>t_prefill <b>610 ms</b></span>
+              <span class="term " data-rf="t_decode"><i style="background:var(--t-decode)"></i>t_decode <b>5.20 s</b></span>
+              <span class="term is-omitted" data-rf="t_evict"><i style="background:var(--t-evict)"></i>t_evict <b>omitted</b></span>
+            </div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">10.01 s</div><div class="ts" data-rf="sigma_ms">&plusmn; 1.50 s &middot; 1&sigma;</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="laptop-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">laptop-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">geforce mx550 4 gb &middot; lm-studio</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">3.00 GiB</b></span><span>util <b data-rf="gpu_util">&mdash;</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf"><span class="tagw is-unknown" data-rf="was_resident">residency unknown</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">insufficient_vram</b><br>no estimate produced &mdash; model needs 4.42 GiB resident, 3.00 GiB free</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="nuc-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">nuc-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">intel arc a770 &middot; lm-studio</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">15.60 GiB</b></span><span>util <b data-rf="gpu_util">0%</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf"><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">engine_down</b><br>no estimate produced &mdash; lm-studio unreachable for 3 min 12 s</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="mini-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">mini-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">apple m2 pro &middot; lm-studio &middot; 2 slots</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">20.00 GiB</b></span><span>util <b data-rf="gpu_util">11%</b></span><span>inflight <b data-rf="inflight">1 / 2</b></span></div>
+            <div class="cconf"><span class="tagw is-cold" data-rf="was_resident">cold</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">node_stale</b><br>no estimate produced &mdash; last telemetry 94 s ago, limit 15 s</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+      </section>
+      <div class="d-foot">
+        <span class="lbl">state reference &mdash; static markup, not live</span>
+        <div class="state-line" style="margin-top:11px">decision badge: t_queue &middot; t_load &middot; t_prefill &middot; t_decode &middot; t_evict &middot; <b>&#8776; within_noise</b> &middot; single_candidate</div>
+        <div class="state-line">rejection reason: <b class="warn">insufficient_vram</b> &middot; <b class="warn">model_missing</b> &middot; <b class="warn">engine_down</b> &middot; <b class="warn">node_stale</b> &middot; <b class="warn">excluded</b></div>
+        <div class="state-line">confidence: <b>seeded</b> &middot; <b>learning</b> &middot; <b class="live">converged</b> &middot; term with no signal: <b>omitted</b>, never zero</div>
+        <div style="margin-top:16px"><div class="empty" data-rf-item="empty_decision"><div class="empty-t">No decision trace</div><div class="empty-d">This job never reached scheduling, or it ran before tracing was enabled.</div></div></div>
+      </div>
+      </div>
+    </div>
+  </div>
+<template id="rf-tpl-candidate-admitted">
+        <div class="crow is-winner" data-rf-item="candidate" data-node="jetson-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">jetson-01</span><span class="tagw is-warm" data-rf="admitted">selected</span><span class="tagw is-warm" data-rf="was_resident">warm</span></div>
+            <div class="cgpu">jetson orin nx &middot; ollama &middot; 2 slots</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">5.50 GiB</b></span><span>util <b data-rf="gpu_util">62%</b></span><span>inflight <b data-rf="inflight">1 / 2</b></span></div>
+            <div class="cconf">conf <span class="is-converged" data-rf="conf">converged</span> &middot; <span data-rf="samples">214</span> samples</div>
+          </div>
+          <div class="cplot">
+            <div class="track">
+              <div class="track-grid" aria-hidden="true"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i><i style="left:100%"></i></div>
+              <div class="guide" style="left:55.13%" aria-hidden="true"></div>
+              <div class="bar">
+              <span class="seg seg-t_queue is-zero" data-rf="t_queue" style="width:0%"></span>
+              <span class="seg seg-t_load is-zero" data-rf="t_load" style="width:0%"></span>
+              <span class="seg seg-t_prefill" data-rf="t_prefill" style="width:3.88%"></span>
+              <span class="seg seg-t_decode" data-rf="t_decode" style="width:51.25%"></span>
+              <span class="seg seg-t_evict is-zero" data-rf="t_evict" style="width:0%"></span>
+              </div>
+            </div>
+            <div class="whisk">
+              <div class="band" data-rf="sigma_ms" style="left:40.13%;width:30.00%"></div>
+              <div class="mark" data-rf="predicted_total_ms" style="left:55.13%"></div>
+            </div>
+            <div class="terms">
+              <span class="term is-zero" data-rf="t_queue"><i style="background:var(--t-queue)"></i>t_queue <b>0 ms</b></span>
+              <span class="term is-zero" data-rf="t_load"><i style="background:var(--t-load)"></i>t_load <b>0 ms</b></span>
+              <span class="term " data-rf="t_prefill"><i style="background:var(--t-prefill)"></i>t_prefill <b>620 ms</b></span>
+              <span class="term " data-rf="t_decode"><i style="background:var(--t-decode)"></i>t_decode <b>8.20 s</b></span>
+              <span class="term is-zero" data-rf="t_evict"><i style="background:var(--t-evict)"></i>t_evict <b>0 ms</b></span>
+            </div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">8.82 s</div><div class="ts" data-rf="sigma_ms">&plusmn; 2.40 s &middot; 1&sigma;</div></div>
+        </div>
+</template>
+<template id="rf-tpl-candidate-rejected">
+        <div class="crow is-rejected" data-rf-item="candidate" data-node="laptop-01">
+          <div class="cid">
+            <div class="cnode"><span class="cid-id" data-rf="node_id">laptop-01</span><span class="tagw is-rejected" data-rf="admitted">rejected</span></div>
+            <div class="cgpu">geforce mx550 4 gb &middot; lm-studio</div>
+          <div class="cstate"><span>vram_free <b data-rf="vram_free">3.00 GiB</b></span><span>util <b data-rf="gpu_util">&mdash;</b></span><span>inflight <b data-rf="inflight">0 / 1</b></span></div>
+            <div class="cconf"><span class="tagw is-unknown" data-rf="was_resident">residency unknown</span></div>
+          </div>
+          <div class="cplot">
+            <div class="noest"><b data-rf="reason">insufficient_vram</b><br>no estimate produced &mdash; model needs 4.42 GiB resident, 3.00 GiB free</div>
+          </div>
+          <div class="ctotal"><div class="tt" data-rf="predicted_total_ms">&mdash;</div><div class="ts" data-rf="sigma_ms">not scored</div></div>
+        </div>
+</template>
+<template id="rf-tpl-empty-decision">
+        <div class="empty" data-rf-item="empty_decision"><div class="empty-t">No decision trace</div><div class="empty-d">This job never reached scheduling, or it ran before tracing was enabled.</div></div>
+</template>
+<script>
+(function () {
+  var tabs = document.getElementById('rf-tabs');
+  var canvas = document.getElementById('rf-canvas');
+  var ids = ['job-1', 'job-2', 'job-3'];
+  function show(id) {
+    var winner = null;
+    ids.forEach(function (p) {
+      var el = document.getElementById(p);
+      if (!el) return;
+      el.hidden = (p !== id);
+      if (p === id) {
+        winner = el.getAttribute('data-winner');
+        Array.prototype.forEach.call(el.querySelectorAll('.seg, .band, .mark'), function (s) {
+          s.style.animation = 'none';
+          void s.offsetWidth;
+          s.style.animation = '';
+        });
+      }
+    });
+    Array.prototype.forEach.call(tabs.children, function (b) {
+      b.classList.toggle('is-active', b.getAttribute('data-target') === id);
+    });
+    Array.prototype.forEach.call(canvas.querySelectorAll('[data-rf-link]'), function (p) {
+      var on = p.getAttribute('data-rf-link') === winner || p.getAttribute('data-rf-link') === 'client';
+      p.classList.toggle('is-lit', on);
+      p.classList.toggle('is-mute', !on);
+    });
+    Array.prototype.forEach.call(canvas.querySelectorAll('[data-node]'), function (n) {
+      n.classList.toggle('is-selected', n.getAttribute('data-node') === winner);
+    });
+  }
+  tabs.addEventListener('click', function (e) {
+    var b = e.target.closest('.tab');
+    if (b) show(b.getAttribute('data-target'));
+  });
+  var h = window.location.hash.replace('#', '');
+  show(ids.indexOf(h) > -1 ? h : ids[0]);
+})();
+</script>
+<template id="rf-tpl-node">
+      <div class="node " data-rf-item="node" data-node="desktop-01" style="left:14.24%;top:17.11%;--i:0">
+        <span class="dev"><span class="dev-lvl" style="--vram:55%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="shock" aria-hidden="true"></span><span class="shock s2" aria-hidden="true"></span><svg width="46" height="62" viewBox="0 0 46 62" aria-hidden="true"><rect x="12" y="4" width="22" height="54" rx="2"></rect><line x1="17" y1="12" x2="29" y2="12"></line><line x1="17" y1="17" x2="29" y2="17"></line><line x1="17" y1="22" x2="29" y2="22"></line><circle cx="23" cy="50" r="2.5"></circle></svg></span>
+        <span class="node-id" data-rf="id">desktop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.12</span> &middot; <span data-rf="gpu_name">RTX 4060 Laptop</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">7%</span><span data-rf="temperature_c">52&deg;</span><span data-rf="power_watts">15.7 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:55.3%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+</template>
+<script>
+(function () {
+  var canvas = document.getElementById('rf-canvas');
+  var world = document.getElementById('rf-world');
+  if (!canvas || !world) return;
+  var svg = world.querySelector('.links');
+  var VW = 1180, VH = 760;
+  var view = { x: 0, y: 0, s: 1 };
+  var fitted = false;
+  function apply() {
+    world.style.transformOrigin = '0 0';
+    world.style.margin = '0';
+    world.style.top = '0';
+    world.style.left = '0';
+    world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.s + ')';
+  }
+  function key(el) {
+    if (el.hasAttribute('data-node')) return el.getAttribute('data-node');
+    var it = el.getAttribute('data-rf-item');
+    if (it === 'hub') return 'hub';
+    if (it === 'client') return 'clients';
+    return null;
+  }
+  function points() {
+    var m = {};
+    Array.prototype.forEach.call(world.querySelectorAll('.node'), function (el) {
+      var k = key(el);
+      if (k) m[k] = { x: parseFloat(el.style.left) / 100 * VW, y: parseFloat(el.style.top) / 100 * VH };
+    });
+    return m;
+  }
+  function d(a, b) {
+    var dx = (b.x - a.x) * 0.45;
+    return 'M ' + a.x + ' ' + a.y + ' C ' + (a.x + dx) + ' ' + a.y + ', ' + (b.x - dx) + ' ' + b.y + ', ' + b.x + ' ' + b.y;
+  }
+  function relink() {
+    var m = points();
+    Array.prototype.forEach.call(svg.querySelectorAll('path'), function (p) {
+      var a = m[p.getAttribute('data-a')], b = m[p.getAttribute('data-b')];
+      if (a && b) p.setAttribute('d', d(a, b));
+    });
+  }
+  var drag = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    var n = e.target.closest('.node');
+    if (n) {
+      drag = { el: n, sx: e.clientX, sy: e.clientY, l: parseFloat(n.style.left), t: parseFloat(n.style.top), moved: false };
+      n.classList.add('is-drag');
+    } else {
+      drag = { pan: true, sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
+      canvas.classList.add('is-panning');
+    }
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    if (drag.pan) {
+      world.setAttribute('data-touched', '1');
+      view.x = drag.ox + (e.clientX - drag.sx);
+      view.y = drag.oy + (e.clientY - drag.sy);
+      apply();
+      return;
+    }
+    var box = world.getBoundingClientRect();
+    var px = (e.clientX - drag.sx) / box.width * 100;
+    var py = (e.clientY - drag.sy) / box.height * 100;
+    if (Math.abs(e.clientX - drag.sx) > 3 || Math.abs(e.clientY - drag.sy) > 3) drag.moved = true;
+    var nl = Math.min(96, Math.max(4, drag.l + px));
+    var nt = Math.min(94, Math.max(6, drag.t + py));
+    drag.el.style.left = nl.toFixed(2) + '%';
+    drag.el.style.top = nt.toFixed(2) + '%';
+    relink();
+  });
+  function end() {
+    if (!drag) return;
+    if (drag.el) drag.el.classList.remove('is-drag');
+    if (drag.moved) { world.setAttribute('data-dragged', '1'); world.setAttribute('data-touched', '1'); }
+    canvas.classList.remove('is-panning');
+    drag = null;
+  }
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var box = world.getBoundingClientRect();
+    var mx = e.clientX - box.left, my = e.clientY - box.top;
+    var ns = Math.min(1.9, Math.max(0.5, view.s * (e.deltaY < 0 ? 1.09 : 1 / 1.09)));
+    var k = ns / view.s;
+    view.x -= mx * (k - 1);
+    view.y -= my * (k - 1);
+    view.s = ns;
+    world.setAttribute('data-touched', '1');
+    apply();
+  }, { passive: false });
+  function fit() {
+    var rl = parseFloat(canvas.getAttribute('data-reserve-left') || 0);
+    var rr = parseFloat(canvas.getAttribute('data-reserve-right') || 0);
+    var cw = canvas.clientWidth, ch = canvas.clientHeight;
+    if (cw <= 0 || ch <= 0) return false;
+    var bw = Math.max(240, cw - rl - rr);
+    var s = Math.max(0.2, Math.min(bw / VW, ch / VH) * 0.92);
+    view.s = s;
+    view.x = rl + (bw - VW * s) / 2;
+    view.y = (ch - VH * s) / 2;
+    apply();
+    fitted = true;
+    return true;
+  }
+  var ro = null;
+  function refit() {
+    if (world.getAttribute('data-touched')) { if (ro) { ro.disconnect(); ro = null; } return; }
+    fit();
+  }
+  if (typeof ResizeObserver === 'function') {
+    ro = new ResizeObserver(refit);
+    ro.observe(canvas);
+  }
+  refit();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refit);
+  window.addEventListener('load', refit);
+  window.addEventListener('resize', refit);
+  requestAnimationFrame(refit);
+  function refit() {
+    if (world.getAttribute('data-touched')) return;
+    fit();
+  }
+  if (!fit()) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refit);
+    requestAnimationFrame(refit);
+    window.addEventListener('load', refit);
+  }
+  if (typeof ResizeObserver === 'function') { new ResizeObserver(refit).observe(canvas); }
+  var reset = document.getElementById('rf-view-reset');
+  if (reset) {
+    reset.addEventListener('click', function () {
+      fit();
+    });
+  }
+})();
+</script>
+<script>
+(function () {
+  var canvas = document.getElementById('rf-canvas');
+  if (!canvas) return;
+  var links = canvas.querySelectorAll('[data-rf-link]');
+  var nodes = canvas.querySelectorAll('.node');
+  function setFocus(id) {
+    canvas.classList.toggle('is-focusing', !!id);
+    Array.prototype.forEach.call(nodes, function (n) {
+      var k = n.getAttribute('data-node') || (n.getAttribute('data-rf-item') === 'hub' ? 'hub' : 'clients');
+      n.classList.toggle('is-focus', !!id && (k === id || k === 'hub' || k === 'clients'));
+    });
+    Array.prototype.forEach.call(canvas.querySelectorAll('.link,.link-glow,.link-flow'), function (p) {
+      var rf = p.getAttribute('data-rf-link');
+      p.classList.toggle('is-focus', !!id && (rf === id || rf === 'client'));
+    });
+  }
+  canvas.addEventListener('pointerover', function (e) {
+    var n = e.target.closest('.node[data-node]');
+    if (n) setFocus(n.getAttribute('data-node'));
+  });
+  canvas.addEventListener('pointerout', function (e) {
+    if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('.node[data-node]')) setFocus(null);
+  });
+  var order = [];
+  Array.prototype.forEach.call(canvas.querySelectorAll('.node[data-node]'), function (n) { order.push(n); });
+  var cur = -1;
+  document.addEventListener('keydown', function (e) {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    var d = 0;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') d = 1;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') d = -1;
+    if (!d) return;
+    e.preventDefault();
+    cur = (cur + d + order.length) % order.length;
+    var n = order[cur];
+    setFocus(n.getAttribute('data-node'));
+    n.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  var map = document.getElementById('rf-minimap');
+  if (map) {
+    var sync = function () {
+      Array.prototype.forEach.call(map.querySelectorAll('i'), function (dot) {
+        var k = dot.getAttribute('data-for');
+        var src = canvas.querySelector(k === 'hub' ? '[data-rf-item="hub"]' : (k === 'clients' ? '[data-rf-item="client"]' : '[data-node="' + k + '"]'));
+        if (!src) return;
+        dot.style.left = src.style.left;
+        dot.style.top = src.style.top;
+      });
+    };
+    sync();
+    canvas.addEventListener('pointermove', sync);
+  }
+  function count(el) {
+    var txt = el.firstChild;
+    if (!txt || txt.nodeType !== 3) return;
+    var raw = txt.nodeValue.trim();
+    var m = raw.match(/^(\d+(?:\.\d+)?)(.*)$/);
+    if (!m) return;
+    var end = parseFloat(m[1]), dec = (m[1].split('.')[1] || '').length, tail = m[2];
+    var t0 = null, dur = 780;
+    function step(ts) {
+      if (!t0) t0 = ts;
+      var k = Math.min(1, (ts - t0) / dur);
+      var e = 1 - Math.pow(1 - k, 3);
+      txt.nodeValue = (end * e).toFixed(dec) + tail;
+      if (k < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.tel-v, .tt, .node-tel span, .s-v'), count);
+})();
+</script>
+<script>
+(function () {
+  var svg = document.getElementById('rf-hints');
+  var ov = document.getElementById('rf-ov');
+  var canvas = document.getElementById('rf-canvas');
+  if (!svg || !ov || !canvas) return;
+  function draw() {
+    var panel = document.querySelector('.dpanel:not([hidden])');
+    if (!panel) return;
+    svg.innerHTML = '';
+    var sb = svg.getBoundingClientRect();
+    svg.setAttribute('viewBox', '0 0 ' + Math.round(sb.width) + ' ' + Math.round(sb.height));
+    Array.prototype.forEach.call(panel.querySelectorAll('.crow[data-node]'), function (row) {
+      var id = row.getAttribute('data-node');
+      var dev = document.querySelector('#rf-minimap i[data-for="' + id + '"]');
+      if (!dev) return;
+      var r = row.getBoundingClientRect(), d = dev.getBoundingClientRect();
+      if (r.bottom < sb.top + 8 || r.top > sb.bottom - 8) return;
+      if (r.left - sb.left < 4) return;
+      var x1 = r.right - sb.left - 150, y1 = r.top - sb.top + 20;
+      var x2 = d.left - sb.left + d.width / 2, y2 = d.top - sb.top + d.height / 2;
+      var alt = row.classList.contains('is-winner') ? '' : ' is-alt';
+      var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p.setAttribute('class', 'hint-l' + alt);
+      p.setAttribute('d', 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + 70) + ' ' + y1 + ', ' + (x2 - 70) + ' ' + y2 + ', ' + x2 + ' ' + y2);
+      svg.appendChild(p);
+      var c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('class', 'hint-d' + alt);
+      c.setAttribute('cx', x1); c.setAttribute('cy', y1); c.setAttribute('r', 2.5);
+      svg.appendChild(c);
+    });
+  }
+  ov.addEventListener('scroll', draw);
+  window.addEventListener('resize', draw);
+  canvas.addEventListener('pointermove', draw);
+  document.addEventListener('click', function () { setTimeout(draw, 30); });
+  setTimeout(draw, 260);
+  draw();
+})();
+</script>
+<script src="rf-bind.js"></script>
+</body>
+</html>

@@ -4,6 +4,7 @@
 //   POST /api/chat              Ollama-native ingest
 //   POST /api/generate          Ollama-native ingest
 //   GET  /v1/models             union of models on disk across the cluster
+//   GET  /                      static console (ui/cluster.html)
 //   GET  /snapshot              collector envelope (NoteFlow and friends)
 //   GET  /api/nodes             live cluster state (UI)
 //   GET  /api/jobs              recent trace records (UI)
@@ -18,6 +19,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <map>
 #include <memory>
@@ -178,6 +180,67 @@ private:
     uint64_t version_ = 0;
 };
 
+// --- static UI ---------------------------------------------------------------
+
+// The console is four standalone pages linked by relative hrefs, so they are
+// served flat out of one directory.
+//
+// These files carry no cluster data — only the design's placeholder fixtures —
+// and the binding layer fetches the real state from /api/*, which stays behind
+// the bearer token. So the shell is served without auth, which is what lets a
+// browser load it at all: a navigation cannot carry an Authorization header.
+// See the note in docs/design/ about what that means when a token is set.
+const char* content_type_for(const std::string& name) {
+    auto ends_with = [&name](const char* suffix) {
+        const size_t n = std::strlen(suffix);
+        return name.size() >= n && name.compare(name.size() - n, n, suffix) == 0;
+    };
+    if (ends_with(".html")) return "text/html; charset=utf-8";
+    if (ends_with(".js")) return "application/javascript; charset=utf-8";
+    if (ends_with(".css")) return "text/css; charset=utf-8";
+    if (ends_with(".svg")) return "image/svg+xml";
+    if (ends_with(".json")) return "application/json";
+    if (ends_with(".woff2")) return "font/woff2";
+    if (ends_with(".png")) return "image/png";
+    return "application/octet-stream";
+}
+
+// True only for a plain basename: no separator, no dot-dot, no leading dot.
+// The router serves whatever is in the UI directory, so the guard is on the
+// name rather than on a resolved path — there is no way to escape a directory
+// you can never name your way out of.
+bool safe_ui_name(const std::string& name) {
+    if (name.empty() || name.size() > 128) return false;
+    if (name.front() == '.') return false;
+    for (char c : name) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+        if (!ok) return false;
+    }
+    return name.find("..") == std::string::npos;
+}
+
+// The cluster view the console reads, from both /api/nodes and the SSE stream.
+//
+// It exists because those two were briefly different: the route merged the
+// ledger's counts and the stream did not, so `inflight` showed a number on load
+// and then vanished on the first push. One builder, one shape.
+rf::Json cluster_json(const rf::NodeRegistry& registry, const rf::RouterState& state) {
+    rf::Json nodes = registry.to_json();
+    const rf::Json ledger = state.ledger_counts_json();
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        rf::Json& n = nodes.at(i);
+        // The console shows the ledger's in-flight count, not the engine's
+        // self-report: the ledger is what the scheduler actually reasoned
+        // about, while inflight_reported arrives a poll interval late (§6.3).
+        const rf::Json& acc = ledger[n["id"].as_str()];
+        n["inflight"] = rf::Json(acc["inflight"].as_u32(0));
+        n["decoders"] = rf::Json(acc["decoders"].as_u32(0));
+        n["reserved_vram_bytes"] = rf::Json(acc["reserved_vram_bytes"].as_u64(0));
+    }
+    return nodes;
+}
+
 // Which models are actually resident, and where.
 //
 // A node whose engine cannot report residency is NOT reported as holding
@@ -244,6 +307,8 @@ int main(int argc, char** argv) {
     const int node_timeout_ms = static_cast<int>(cfg.get_u32("node.timeout_ms", 2000));
     const int request_timeout_ms =
         static_cast<int>(cfg.get_u32("request_timeout_ms", 600000));
+    // Empty disables static serving entirely, for a router that only routes.
+    const std::string ui_dir = cfg.get_str("ui.dir", "ui");
 
     // §10, from the first commit: LAN exposure is opt-in and authenticated.
     if (bind != "127.0.0.1" && client_token.empty()) {
@@ -314,6 +379,23 @@ int main(int argc, char** argv) {
             res.send_json(200, "{\"ok\":true,\"service\":\"routeflow-router\"}");
             return;
         }
+        // The static console shell, before the token gate — see the note on
+        // content_type_for. It contains no cluster data; everything real comes
+        // from /api/*, which is gated below.
+        if (req.method == "GET" && !ui_dir.empty()) {
+            std::string name;
+            if (req.path == "/") name = "cluster.html";
+            else if (req.path.find('/', 1) == std::string::npos) name = req.path.substr(1);
+
+            if (!name.empty() && safe_ui_name(name)) {
+                std::string body;
+                if (rf::read_file(ui_dir + "/" + name, body)) {
+                    res.send(200, content_type_for(name), body);
+                    return;
+                }
+            }
+        }
+
         if (!authorised(req, client_token)) {
             res.send_error(401, "unauthorized", "missing or bad bearer token");
             return;
@@ -361,9 +443,10 @@ int main(int argc, char** argv) {
 
         // --- UI data --------------------------------------------------------
         if (req.method == "GET" && req.path == "/api/nodes") {
-            res.send_json(200, registry.to_json().dump());
+            res.send_json(200, cluster_json(registry, state).dump());
             return;
         }
+
         // Collector envelope. RouteFlow publishes the read state it already
         // has under a shared wrapper; it adds no measurement and opens no new
         // path to the control endpoints, which stay exactly where they are.
@@ -392,7 +475,7 @@ int main(int argc, char** argv) {
             snapshot["now_ns"] = rf::Json(rf::now_ns());
 
             // Body sits at the same level as the envelope, not nested.
-            snapshot["nodes"] = registry.to_json();
+            snapshot["nodes"] = cluster_json(registry, state);
             snapshot["jobs_recent"] = history.summary_json();
             rf::Json residency_unknown;
             snapshot["models_warm"] = warm_models_json(nodes, residency_unknown);
@@ -419,7 +502,7 @@ int main(int argc, char** argv) {
             if (!res.begin(200, h)) return;
 
             uint64_t seen = history.version();
-            if (!res.sse("nodes", registry.to_json().dump())) return;
+            if (!res.sse("nodes", cluster_json(registry, state).dump())) return;
 
             int64_t last_nodes_push = rf::mono_ms();
             while (res.alive() && !g_stop.load()) {
@@ -434,7 +517,7 @@ int main(int argc, char** argv) {
                 // on its own schedule), so push it on a timer.
                 if (rf::mono_ms() - last_nodes_push >= 1000) {
                     last_nodes_push = rf::mono_ms();
-                    if (!res.sse("nodes", registry.to_json().dump())) break;
+                    if (!res.sse("nodes", cluster_json(registry, state).dump())) break;
                 }
             }
             res.end();

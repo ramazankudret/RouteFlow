@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>RouteFlow &mdash; cluster</title>
+<style>
+:root{
+  --void:#05070a; --void-2:#0a0e13; --void-3:#101720;
+  --hair:#18202a; --hair-2:#26313d;
+  --fg:#e6efe9; --fg-2:#93a3ac; --fg-3:#5b6971;
+  --live:#33e07a; --live-2:#1d7d47; --cold:#d95926; --idle:#4a545e; --alert:#d55181;
+  --t-queue:#3987e5; --t-load:#d95926; --t-prefill:#199e70; --t-decode:#c98500; --t-evict:#d55181;
+  --f-mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --f-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Ubuntu,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --fs-0:9px; --fs-1:10px; --fs-2:11px; --fs-3:12px; --fs-4:14px; --fs-5:17px; --fs-6:22px; --fs-7:30px;
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:22px; --s-6:32px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--void);color:var(--fg);font:var(--fs-3)/1.5 var(--f-ui);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;background:radial-gradient(1100px 620px at 44% 42%,#0c141d 0%,#05070a 72%);z-index:0}
+a{color:var(--live);text-decoration:none}
+a:hover{color:#6ff0a4}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.mono{font-family:var(--f-mono)}
+.lbl{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--fg-3)}
+.dim{color:var(--fg-3)}
+
+.top{position:relative;z-index:5;display:flex;align-items:center;gap:var(--s-6);height:52px;padding:0 var(--s-5);border-bottom:1px solid var(--hair)}
+.brand{font:600 var(--fs-3)/1 var(--f-mono);letter-spacing:.28em;text-transform:uppercase}
+.brand em{font-style:normal;color:var(--live);text-shadow:0 0 10px rgba(51,224,122,.7)}
+.modes{display:flex;gap:var(--s-5)}
+.modes a{font:600 var(--fs-1)/1 var(--f-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--fg-3);padding:6px 0;border-bottom:1px solid transparent}
+.modes a:hover{color:var(--fg-2)}
+.modes a.is-active{color:var(--fg);border-bottom-color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.45)}
+.top-r{margin-left:auto;display:flex;gap:var(--s-5);font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.06em}
+.top-r b{color:var(--fg-2);font-weight:600}
+.top-r .live{color:var(--live)}
+
+.stage{position:relative;z-index:1;height:calc(100vh - 52px);min-height:680px}
+.canvas{position:absolute;inset:0}
+.canvas.is-dim{opacity:.3}
+.links{position:absolute;inset:0;width:100%;height:100%}
+.link{fill:none;stroke-width:1.4;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.link.is-warm{stroke:var(--live);opacity:.75;animation:rf-pulse 3.8s ease-in-out infinite}
+.link.is-cold{stroke:var(--cold);opacity:.7;animation:rf-pulse 4.6s ease-in-out infinite}
+.link.is-unknown{stroke:var(--idle);opacity:.5}
+.link.is-offline{stroke:#2a3138;opacity:.6;stroke-dasharray:2 7}
+.link-glow{fill:none;stroke-width:6;stroke-linecap:round;vector-effect:non-scaling-stroke;filter:blur(4px)}
+.link-glow.is-warm{stroke:var(--live);opacity:.22;animation:rf-pulse 3.8s ease-in-out infinite}
+.link-glow.is-cold{stroke:var(--cold);opacity:.18;animation:rf-pulse 4.6s ease-in-out infinite}
+.link-glow.is-unknown,.link-glow.is-offline{stroke:none}
+@keyframes rf-pulse{0%,100%{opacity:.42}50%{opacity:.95}}
+@keyframes rf-breathe{0%,100%{filter:drop-shadow(0 0 6px currentColor) drop-shadow(0 0 15px currentColor)}50%{filter:drop-shadow(0 0 9px currentColor) drop-shadow(0 0 26px currentColor)}}
+
+.node{position:absolute;transform:translate(-50%,-50%);width:184px;display:grid;justify-items:center;gap:8px;cursor:pointer;text-align:center}
+.dev{color:var(--live);animation:rf-breathe 5.2s ease-in-out infinite}
+.dev svg{display:block;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linejoin:round}
+.node.is-offline .dev{color:#39434b;animation:none;filter:none}
+.node.is-unknown .dev{color:var(--idle);animation:none;filter:drop-shadow(0 0 5px currentColor)}
+.node.is-hub .dev{color:#8ef0b6}
+.node-id{font:600 var(--fs-2)/1 var(--f-mono);letter-spacing:.18em;text-transform:uppercase}
+.node.is-offline .node-id{color:var(--fg-3)}
+.node-sub{font:var(--fs-0)/1.5 var(--f-mono);color:var(--fg-3);letter-spacing:.08em}
+.node-tel{display:flex;gap:var(--s-3);font:var(--fs-0)/1 var(--f-mono);color:var(--fg-2);letter-spacing:.04em}
+.node-tel s{text-decoration:none;color:var(--fg-3)}
+.node-vram{width:132px;height:3px;background:#121a21;position:relative}
+.node-vram i{position:absolute;top:0;bottom:0;left:0}
+.node-vram .vr-used{background:#2a3540}
+.node-vram .vr-res{background:var(--live);box-shadow:0 0 7px var(--live)}
+.node-vram .vr-res.is-zero{display:none}
+.shelf{display:grid;gap:3px;justify-items:center;margin-top:2px}
+.m-res{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:var(--live);text-shadow:0 0 8px rgba(51,224,122,.55)}
+.m-disk{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:#424d56}
+.m-none{font:var(--fs-0)/1.35 var(--f-mono);letter-spacing:.06em;color:#4e5a63}
+.node.is-selected .node-id{color:var(--live);text-shadow:0 0 12px rgba(51,224,122,.5)}
+.node-queue{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;color:var(--t-queue);text-shadow:0 0 8px rgba(57,135,229,.6)}
+.node-flag{font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;color:var(--cold)}
+
+.panel{position:absolute;top:0;right:0;bottom:0;width:452px;padding:var(--s-5) var(--s-5) var(--s-6);border-left:1px solid var(--hair);background:rgba(5,7,10,.9);backdrop-filter:blur(12px);overflow-y:auto;z-index:3}
+.panel::-webkit-scrollbar{width:8px}
+.panel::-webkit-scrollbar-thumb{background:#1c242c}
+.p-h{display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)}
+.p-id{font:600 var(--fs-5)/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase}
+.p-gpu{font:var(--fs-2)/1.5 var(--f-mono);color:var(--fg-2)}
+.p-ip{font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.08em}
+.p-sec{margin-top:var(--s-5);padding-top:var(--s-3);border-top:1px solid var(--hair)}
+.p-sec>.lbl{display:block;margin-bottom:var(--s-3)}
+.tel{display:grid;grid-template-columns:1fr 1fr;gap:var(--s-3) var(--s-5)}
+.tel-i{display:grid;gap:5px}
+.tel-v{font:var(--fs-5)/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.tel-v u{text-decoration:none;font-size:var(--fs-1);color:var(--fg-3)}
+.tel-v.is-unknown{color:var(--fg-3)}
+.tel-v.is-live{color:var(--live)}
+.tel-v.is-hot{color:var(--cold)}
+.bar-row{display:flex;justify-content:space-between;font:var(--fs-1)/1 var(--f-mono);color:var(--fg-3);margin-bottom:7px}
+.bar-row b{color:var(--fg-2)}
+.bar{position:relative;height:6px;background:#111820}
+.bar i{position:absolute;top:0;bottom:0;left:0}
+.bar .b-used{background:#28323c}
+.bar .b-res{background:var(--live);box-shadow:0 0 8px var(--live)}
+.bar .b-res.is-zero{display:none}
+.bar-key{display:flex;gap:var(--s-4);margin-top:9px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.06em}
+.bar-key span{display:inline-flex;align-items:center;gap:6px}
+.bk{width:8px;height:8px}
+.bk-res{background:var(--live);box-shadow:0 0 6px var(--live)}
+.bk-oth{background:#28323c}
+.bk-free{background:#111820;box-shadow:inset 0 0 0 1px #28323c}
+.mcols{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.mcol{padding-right:var(--s-4)}
+.mcol+.mcol{padding-left:var(--s-4);padding-right:0;border-left:1px solid var(--hair)}
+.mcol>.lbl{display:block;margin-bottom:var(--s-3)}
+.mcol.is-res>.lbl{color:var(--live)}
+.mi{padding:7px 0;border-bottom:1px solid #121820}
+.mi:last-child{border-bottom:0}
+.mi-n{font:var(--fs-1)/1.35 var(--f-mono);letter-spacing:.03em;word-break:break-all}
+.mcol.is-res .mi-n{color:var(--live)}
+.mcol.is-disk .mi-n{color:var(--fg-2)}
+.mi-m{font:var(--fs-0)/1.4 var(--f-mono);color:var(--fg-3);margin-top:3px;font-variant-numeric:tabular-nums}
+.p-note{font:var(--fs-1)/1.6 var(--f-mono);color:var(--fg-3);letter-spacing:.03em}
+.p-note b{color:var(--fg-2)}
+.eng{display:flex;flex-wrap:wrap;gap:var(--s-4);font:var(--fs-1)/1 var(--f-mono);letter-spacing:.06em;color:var(--fg-2)}
+.eng span{display:inline-flex;align-items:center;gap:7px}
+.led{width:7px;height:7px;border-radius:50%;background:var(--idle)}
+.led.is-on{background:var(--live);box-shadow:0 0 8px var(--live)}
+.led.is-off{background:#3a2420;box-shadow:0 0 6px rgba(217,89,38,.5)}
+.state-line{font:var(--fs-1)/1.7 var(--f-mono);color:var(--fg-3);letter-spacing:.04em}
+.state-line b{color:var(--fg-2)}
+.state-line .warn{color:var(--cold)}
+.state-line .live{color:var(--live)}
+.empty{border:1px dashed var(--hair-2);padding:var(--s-5);max-width:460px}
+.empty-t{font:600 var(--fs-3)/1.3 var(--f-mono);letter-spacing:.06em;margin-bottom:6px}
+.empty-d{font:var(--fs-1)/1.6 var(--f-mono);color:var(--fg-3)}
+.stage-note{position:absolute;left:var(--s-5);bottom:var(--s-4);z-index:2;font:var(--fs-0)/1.7 var(--f-mono);color:#3d474f;letter-spacing:.08em;max-width:420px}
+
+.insp{animation:none}
+.stage-legend{position:absolute;left:var(--s-5);bottom:66px;z-index:2;display:grid;gap:7px;font:var(--fs-0)/1 var(--f-mono);color:var(--fg-3);letter-spacing:.09em}
+.stage-legend span{display:inline-flex;align-items:center;gap:8px}
+.slk{width:18px;height:1px;background:currentColor}
+.slk.is-warm{color:var(--live);box-shadow:0 0 6px var(--live)}
+.slk.is-unknown{color:var(--idle)}
+.slk.is-offline{color:#39434b}
+.p-foot{margin-top:var(--s-6);padding-top:var(--s-3);border-top:1px solid var(--hair)}
+
+
+.canvas{cursor:grab;touch-action:none;overflow:hidden}
+.canvas.is-panning{cursor:grabbing}
+.node{touch-action:none}
+.node:hover .dev{color:#7bf0ad}
+.node.is-drag{z-index:9}
+.node.is-drag .dev{animation:none;filter:drop-shadow(0 0 12px currentColor) drop-shadow(0 0 34px currentColor)}
+.node.is-hub:before{content:"";position:absolute;left:50%;top:16px;width:340px;height:340px;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(51,224,122,.12),rgba(51,224,122,0) 68%);pointer-events:none;z-index:-1}
+.link-flow{fill:none;stroke:var(--live);stroke-width:2.2;stroke-linecap:round;vector-effect:non-scaling-stroke;stroke-dasharray:1 22;opacity:.9;filter:drop-shadow(0 0 5px var(--live));animation:rf-flow 2.6s linear infinite}
+.link-flow.is-mute{opacity:0}
+@keyframes rf-flow{from{stroke-dashoffset:46}to{stroke-dashoffset:0}}
+.view-hint{position:absolute;right:var(--s-4);bottom:var(--s-4);z-index:2;display:flex;gap:var(--s-4);align-items:center;font:var(--fs-0)/1 var(--f-mono);color:#3d474f;letter-spacing:.1em}
+.view-reset{appearance:none;background:none;border:1px solid var(--hair-2);color:var(--fg-3);font:var(--fs-0)/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;padding:6px 9px;cursor:pointer}
+.view-reset:hover{color:var(--live);border-color:var(--live-2)}
+
+.canvas{overflow:hidden}
+
+
+
+.dev{position:relative;display:grid;place-items:center;padding:5px}
+.dev svg{position:relative;z-index:2}
+.dev-lvl{position:absolute;left:9px;right:9px;bottom:7px;z-index:1;height:var(--vram,0%);border-radius:2px;background:linear-gradient(180deg,rgba(51,224,122,.4),rgba(51,224,122,.05));border-top:1px solid rgba(51,224,122,.85);box-shadow:0 0 14px rgba(51,224,122,.4);animation:rf-lvl 5.4s ease-in-out infinite}
+.dev-lvl.is-zero{display:none}
+@keyframes rf-lvl{0%,100%{opacity:.75;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
+.heat{position:absolute;top:50%;left:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;border:1px solid currentColor;opacity:.4;pointer-events:none;animation:rf-heat var(--heat-ms,4s) ease-in-out infinite}
+.heat.is-hot{width:92px;height:92px;margin:-46px 0 0 -46px;opacity:.6}
+@keyframes rf-heat{0%,100%{transform:scale(.92);opacity:.28}50%{transform:scale(1.06);opacity:.7}}
+.shock{position:absolute;top:50%;left:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;border:1px solid var(--t-evict);pointer-events:none;opacity:0;animation:rf-shock 7s ease-out infinite}
+.shock.s2{animation-delay:.35s}
+@keyframes rf-shock{0%{transform:scale(.5);opacity:0}6%{opacity:.85}34%{transform:scale(3.1);opacity:0}100%{transform:scale(3.1);opacity:0}}
+.spark{position:absolute;width:3px;height:3px;border-radius:50%;background:#d95926;box-shadow:0 0 8px #d95926;pointer-events:none;animation:rf-spark 1.7s steps(1,end) infinite}
+.spark.s1{top:6px;left:-6px}
+.spark.s2{top:16px;left:-13px;animation-delay:.55s}
+@keyframes rf-spark{0%,42%{opacity:0}46%{opacity:1}52%{opacity:.2}58%{opacity:.9}70%,100%{opacity:0}}
+.canvas.is-focusing .node:not(.is-focus){opacity:.28}
+.canvas.is-focusing .link:not(.is-focus),.canvas.is-focusing .link-glow:not(.is-focus),.canvas.is-focusing .link-flow:not(.is-focus){opacity:.08}
+.canvas.is-focusing .link.is-focus{stroke-width:3;filter:drop-shadow(0 0 7px currentColor)}
+.node,.link,.link-glow,.link-flow{transition:opacity .22s ease}
+.minimap{position:absolute;right:var(--s-4);bottom:52px;z-index:4;width:154px;height:82px;border:1px solid var(--hair);background:rgba(5,7,10,.75)}
+.minimap i{position:absolute;width:5px;height:5px;border-radius:50%;transform:translate(-50%,-50%);background:var(--idle)}
+.minimap i.is-warm{background:var(--live);box-shadow:0 0 5px var(--live)}
+.minimap i.is-offline{background:#3a2420}
+.minimap i.is-hub{width:7px;height:7px;background:#8ef0b6;box-shadow:0 0 7px var(--live)}
+.minimap b{position:absolute;left:6px;top:5px;font:600 var(--fs-0)/1 var(--f-mono);letter-spacing:.12em;color:#39434b;font-weight:400}
+.boot{position:absolute;inset:0;z-index:6;pointer-events:none;background:linear-gradient(90deg,rgba(5,7,10,0) 0%,rgba(51,224,122,.11) 46%,rgba(51,224,122,.5) 50%,rgba(51,224,122,.11) 54%,rgba(5,7,10,0) 100%);animation:rf-boot 1.15s ease-out 1 forwards}
+@keyframes rf-boot{from{transform:translateX(-100%)}to{transform:translateX(100%);opacity:0}}
+.node{animation:rf-in .5s ease-out both;animation-delay:calc(var(--i,0)*.09s + .12s)}
+@keyframes rf-in{from{opacity:0;transform:translate(-50%,-46%)}to{opacity:1;transform:translate(-50%,-50%)}}
+.node.is-drag,.node.is-mute{animation:none}
+.links{animation:rf-fade .9s ease-out .5s both}
+@keyframes rf-fade{from{opacity:0}to{opacity:1}}
+
+.dev{display:inline-grid;width:-moz-fit-content;width:fit-content;justify-self:center}
+.stage:has(.canvas[data-reserve-right]) .minimap{right:468px}
+.stage:has(.canvas[data-reserve-right]) .view-hint{right:468px}
+
+.world{position:absolute;top:0;left:0;width:1180px;height:760px;margin:0;transform-origin:0 0;transform:translate(var(--rf-x,0px),var(--rf-y,0px)) scale(var(--rf-s,.8));background-image:radial-gradient(#111d27 1px,transparent 1px);background-size:46px 46px}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Route<em>Flow</em></span>
+  <nav class="modes">
+    <a href="cluster.html" class="is-active">cluster</a>
+    <a href="jobs.html">jobs</a>
+    <a href="decision.html">decision</a>
+    <a href="accuracy.html">accuracy</a>
+  </nav>
+  <div class="top-r">
+    <span>nodes <b data-rf="nodes_total">0</b></span><span>engines <b data-rf="engines_up">0</b> up</span><span>warm <b class="live" data-rf="warm_total">0</b></span><span>inflight <b data-rf="inflight_total">0</b></span><span>tick <b class="num">1.0 s</b></span>
+  </div>
+</header>
+<div class="stage">
+    <div class="canvas" id="rf-canvas" data-reserve-right="452">
+      <div class="world" id="rf-world" style="transform:translate(40px,61px) scale(0.77)">
+      <span class="boot" aria-hidden="true"></span>
+      <svg class="links" viewBox="0 0 1180 760" preserveAspectRatio="none" aria-hidden="true">
+        <path class="link-glow is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link-glow is-warm" data-rf-link="desktop-01" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link-glow is-warm" data-rf-link="jetson-01" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link-glow is-unknown" data-rf-link="laptop-01" data-a="hub" data-b="laptop-01" d="M 368 366 C 292.4 366, 275.6 596, 200 596"></path>
+        <path class="link-glow is-offline" data-rf-link="nuc-01" data-a="hub" data-b="nuc-01" d="M 368 366 C 493.1 366, 520.9 580, 646 580"></path>
+        <path class="link-glow is-warm" data-rf-link="mini-01" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+        <path class="link is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link is-warm" data-rf-link="desktop-01" style="stroke-width:2.1" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link is-warm" data-rf-link="jetson-01" style="stroke-width:1.2" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link is-unknown" data-rf-link="laptop-01" style="stroke-width:1.4" data-a="hub" data-b="laptop-01" d="M 368 366 C 292.4 366, 275.6 596, 200 596"></path>
+        <path class="link is-offline" data-rf-link="nuc-01" style="stroke-width:1.4" data-a="hub" data-b="nuc-01" d="M 368 366 C 493.1 366, 520.9 580, 646 580"></path>
+        <path class="link is-warm" data-rf-link="mini-01" style="stroke-width:2" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+        <path class="link-flow is-warm" data-rf-link="client" data-a="clients" data-b="hub" d="M 88 366 C 214 366, 242 366, 368 366"></path>
+        <path class="link-flow is-warm" data-rf-link="desktop-01" style="animation-duration:3.4s" data-a="hub" data-b="desktop-01" d="M 368 366 C 278 366, 258 130, 168 130"></path>
+        <path class="link-flow is-warm" data-rf-link="jetson-01" style="animation-duration:1.3s" data-a="hub" data-b="jetson-01" d="M 368 366 C 470.6 366, 493.4 118, 596 118"></path>
+        <path class="link-flow is-warm" data-rf-link="mini-01" style="animation-duration:2.4s" data-a="hub" data-b="mini-01" d="M 368 366 C 544.4 366, 583.6 336, 760 336"></path>
+      </svg>
+      <div class="node" data-rf-item="client" style="left:7.46%;top:48.16%">
+        <span class="dev"><svg width="34" height="48" viewBox="0 0 34 48" aria-hidden="true"><rect x="9" y="5" width="17" height="38" rx="3"></rect><line x1="14" y1="10" x2="21" y2="10"></line><circle cx="17.5" cy="38" r="1.4"></circle></svg></span>
+        <span class="node-id">clients</span>
+        <span class="node-sub">3 apps · openai-compatible</span>
+      </div>
+      <div class="node is-hub" data-rf-item="hub" style="left:31.19%;top:48.16%">
+        <span class="dev"><svg width="56" height="46" viewBox="0 0 56 46" aria-hidden="true"><rect x="8" y="24" width="40" height="13" rx="6.5"></rect><line x1="18" y1="24" x2="13" y2="8"></line><line x1="38" y1="24" x2="43" y2="8"></line><circle cx="19" cy="30.5" r="1.6"></circle><circle cx="28" cy="30.5" r="1.6"></circle><circle cx="37" cy="30.5" r="1.6"></circle></svg></span>
+        <span class="node-id">routeflow</span>
+        <span class="node-sub">localhost:11500 · scheduler</span>
+        <span class="node-tel"><span>5 nodes</span><span>4 up</span><span>3 warm</span></span>
+      </div>
+      <div class="node  is-selected" data-rf-item="node" data-node="desktop-01" style="left:14.24%;top:17.11%;--i:0">
+        <span class="dev"><span class="dev-lvl" style="--vram:55%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="shock" aria-hidden="true"></span><span class="shock s2" aria-hidden="true"></span><svg width="46" height="62" viewBox="0 0 46 62" aria-hidden="true"><rect x="12" y="4" width="22" height="54" rx="2"></rect><line x1="17" y1="12" x2="29" y2="12"></line><line x1="17" y1="17" x2="29" y2="17"></line><line x1="17" y1="22" x2="29" y2="22"></line><circle cx="23" cy="50" r="2.5"></circle></svg></span>
+        <span class="node-id" data-rf="id">desktop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.12</span> &middot; <span data-rf="gpu_name">RTX 4060 Laptop</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">7%</span><span data-rf="temperature_c">52&deg;</span><span data-rf="power_watts">15.7 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:55.3%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="jetson-01" style="left:50.51%;top:15.53%;--i:1">
+        <span class="dev"><span class="dev-lvl" style="--vram:42%" aria-hidden="true"></span><span class="heat is-hot" style="color:#d95926;--heat-ms:2.2s" aria-hidden="true"></span><svg width="52" height="46" viewBox="0 0 52 46" aria-hidden="true"><rect x="4" y="14" width="44" height="28" rx="2"></rect><line x1="12" y1="14" x2="12" y2="8"></line><line x1="17" y1="14" x2="17" y2="8"></line><line x1="22" y1="14" x2="22" y2="8"></line><line x1="27" y1="14" x2="27" y2="8"></line><line x1="32" y1="14" x2="32" y2="8"></line><rect x="12" y="21" width="12" height="11" rx="1"></rect><rect x="29" y="24" width="9" height="7" rx="1"></rect></svg></span>
+        <span class="node-id" data-rf="id">jetson-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.31</span> &middot; <span data-rf="gpu_name">Jetson Orin NX</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">62%</span><span data-rf="temperature_c">78&deg;</span><span data-rf="power_watts">23.6 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:63.3%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:42.0%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-res" data-rf="name">&#9679; llama3.2:3b &middot; 1.88 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">phi3.5:3.8b &middot; on disk</span>
+        </span>
+        <span class="node-queue" data-rf="inflight">queue 1 &middot; 3/2 slots</span>
+      </div>
+      <div class="node is-unknown" data-rf-item="node" data-node="laptop-01" style="left:16.95%;top:78.42%;--i:2">
+        <span class="dev"><span class="dev-lvl is-zero" style="--vram:0%" aria-hidden="true"></span><svg width="52" height="46" viewBox="0 0 52 46" aria-hidden="true"><rect x="11" y="8" width="30" height="21" rx="1.5"></rect><path d="M5 40 L47 40 L41 31 L11 31 Z"></path></svg></span>
+        <span class="node-id" data-rf="id">laptop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.44</span> &middot; <span data-rf="gpu_name">GeForce MX550 4 GB</span></span>
+        <span class="node-tel"><s data-rf="gpu_util">&mdash;</s><s data-rf="temperature_c">&mdash;</s><s data-rf="power_watts">&mdash;</s></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:25.0%"></i><i class="vr-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></span>
+        <span class="shelf">
+          <span class="m-none" data-rf="residency_known">residency unknown</span>
+          <span class="m-disk" data-rf="models_on_disk">qwen2.5:7b &middot; llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+      <div class="node is-offline" data-rf-item="node" data-node="nuc-01" style="left:54.75%;top:76.32%;--i:3">
+        <span class="dev"><span class="dev-lvl is-zero" style="--vram:0%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="spark s1" aria-hidden="true"></span><span class="spark s2" aria-hidden="true"></span><svg width="44" height="46" viewBox="0 0 44 46" aria-hidden="true"><rect x="8" y="10" width="28" height="28" rx="4"></rect><circle cx="22" cy="24" r="4.5"></circle><line x1="13" y1="33" x2="19" y2="33"></line></svg></span>
+        <span class="node-id" data-rf="id">nuc-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.57</span> &middot; <span data-rf="gpu_name">Intel Arc A770</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">0%</span><span data-rf="temperature_c">41&deg;</span><span data-rf="power_watts">9.2 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:2.5%"></i><i class="vr-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></span>
+        <span class="shelf">
+          <span class="m-none">all cold &middot; nothing resident</span>
+          <span class="m-disk" data-rf="models_on_disk">qwen2.5:7b &middot; mistral-nemo:12b &middot; on disk</span>
+        </span>
+        <span class="node-flag" data-rf="engine_healthy">engine down</span>
+      </div>
+      <div class="node " data-rf-item="node" data-node="mini-01" style="left:64.41%;top:44.21%;--i:4">
+        <span class="dev"><span class="dev-lvl" style="--vram:14%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><svg width="52" height="40" viewBox="0 0 52 40" aria-hidden="true"><rect x="7" y="14" width="38" height="15" rx="3"></rect><circle cx="14" cy="21.5" r="1.6"></circle><line x1="30" y1="21.5" x2="39" y2="21.5"></line></svg></span>
+        <span class="node-id" data-rf="id">mini-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.68</span> &middot; <span data-rf="gpu_name">Apple M2 Pro</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">11%</span><span data-rf="temperature_c">47&deg;</span><span data-rf="power_watts">18.4 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:37.5%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:13.8%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">phi3.5:3.8b &middot; mistral-nemo:12b &middot; on disk</span>
+        </span>
+      </div>
+      </div>
+    </div>
+    <div class="stage-legend">
+      <span><i class="slk is-warm"></i>link lit &mdash; engine up, model resident</span>
+      <span><i class="slk is-unknown"></i>link grey &mdash; residency or telemetry unknown</span>
+      <span><i class="slk is-offline"></i>link dashed &mdash; engine down</span>
+    </div>
+    <div class="view-hint">
+      <span>drag devices &middot; drag empty space to pan &middot; scroll to zoom</span>
+      <button type="button" class="view-reset" id="rf-view-reset">reset view</button>
+    </div>
+    <div class="minimap" id="rf-minimap" aria-hidden="true">
+      <b>view</b>
+      <i class="" data-for="clients"></i>
+      <i class="is-hub" data-for="hub"></i>
+      <i class="is-warm" data-for="desktop-01"></i>
+      <i class="is-warm" data-for="jetson-01"></i>
+      <i class="" data-for="laptop-01"></i>
+      <i class="is-offline" data-for="nuc-01"></i>
+      <i class="is-warm" data-for="mini-01"></i>
+    </div>
+    <div class="stage-note">click a device to inspect it &middot; lit labels under a device are resident in VRAM, dim labels are on disk only &mdash; the whole scheduler rests on that difference</div>
+    <aside class="panel" id="rf-insp">
+      <section class="insp" data-insp="desktop-01" data-rf-item="node_detail">
+        <div class="p-h"><span class="p-id" data-rf="id">desktop-01</span><span class="p-ip" data-rf="ip">192.168.1.12</span></div>
+        <div class="p-gpu" data-rf="gpu_name">NVIDIA GeForce RTX 4060 Laptop GPU</div>
+        <div class="p-sec">
+          <div class="eng">
+            <span><i class="led is-on" data-rf="engine_healthy"></i><span data-rf="engine">ollama</span> up</span>
+            <span><i class="led is-on" data-rf="telemetry_ok"></i>telemetry <span data-rf="telemetry_backend">nvml</span></span>
+            <span><i class="led is-on" data-rf="residency_known"></i>residency known</span>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">vram</span>
+          <div class="bar-row"><span><b class="num" data-rf="vram_used_pct">59.4%</b> used</span><span><b class="num" data-rf="vram_free_bytes">3.25 GiB</b> free of <span class="num" data-rf="vram_total_bytes">8.00 GiB</span></span></div>
+          <div class="bar"><i class="b-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="b-res" data-rf="vram_resident_pct" style="width:55.3%"></i></div>
+          <div class="bar-key"><span><i class="bk bk-res"></i>resident 4.42</span><span><i class="bk bk-oth"></i>other 0.33</span><span><i class="bk bk-free"></i>free 3.25</span></div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">telemetry</span>
+          <div class="tel">
+          <div class="tel-i"><span class="lbl">gpu util</span><span class="tel-v " data-rf="gpu_util">7%</span></div>
+          <div class="tel-i"><span class="lbl">temperature</span><span class="tel-v " data-rf="temperature_c">52<u> &deg;C</u></span></div>
+          <div class="tel-i"><span class="lbl">power</span><span class="tel-v " data-rf="power_watts">15.7<u data-rf="power_cap_watts"> / 100 W</u></span></div>
+          <div class="tel-i"><span class="lbl">inflight</span><span class="tel-v " data-rf="inflight">0<u data-rf="engine_slots"> / 1 slots</u></span></div>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">models</span>
+          <div class="mcols">
+            <div class="mcol is-disk">
+              <span class="lbl">on disk &middot; 2</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">llama3.2:3b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">1.88 GiB</span> on disk</div>
+            </div>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">nomic-embed-text</div>
+              <div class="mi-m"><span data-rf="disk_bytes">0.26 GiB</span> on disk</div>
+            </div>
+            </div>
+            <div class="mcol is-res">
+              <span class="lbl">resident in vram &middot; 1</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">qwen2.5:7b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="vram_bytes">4.42 GiB</span> in vram &middot; used <span data-rf="last_used_ms">12 s</span> ago</div>
+            </div>
+            </div>
+          </div>
+        </div>
+        <div class="p-sec"><span class="lbl">why it matters</span><div class="p-note">cold load of <b>qwen2.5:7b</b> measured at <b>9.5 s</b> on this node — that is the number t_load is built from.</div></div>
+      </section>
+      <section class="insp" hidden data-insp="jetson-01" data-rf-item="node_detail">
+        <div class="p-h"><span class="p-id" data-rf="id">jetson-01</span><span class="p-ip" data-rf="ip">192.168.1.31</span></div>
+        <div class="p-gpu" data-rf="gpu_name">NVIDIA Jetson Orin NX — 16 GB unified memory</div>
+        <div class="p-sec">
+          <div class="eng">
+            <span><i class="led is-on" data-rf="engine_healthy"></i><span data-rf="engine">ollama</span> up</span>
+            <span><i class="led is-on" data-rf="telemetry_ok"></i>telemetry <span data-rf="telemetry_backend">tegra</span></span>
+            <span><i class="led is-on" data-rf="residency_known"></i>residency known</span>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">vram</span>
+          <div class="bar-row"><span><b class="num" data-rf="vram_used_pct">63.3%</b> used</span><span><b class="num" data-rf="vram_free_bytes">5.50 GiB</b> free of <span class="num" data-rf="vram_total_bytes">15.00 GiB</span></span></div>
+          <div class="bar"><i class="b-used" data-rf="vram_used_pct" style="width:63.3%"></i><i class="b-res" data-rf="vram_resident_pct" style="width:42.0%"></i></div>
+          <div class="bar-key"><span><i class="bk bk-res"></i>resident 6.30</span><span><i class="bk bk-oth"></i>other 3.20</span><span><i class="bk bk-free"></i>free 5.50</span></div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">telemetry</span>
+          <div class="tel">
+          <div class="tel-i"><span class="lbl">gpu util</span><span class="tel-v is-hot" data-rf="gpu_util">62%</span></div>
+          <div class="tel-i"><span class="lbl">temperature</span><span class="tel-v is-hot" data-rf="temperature_c">78<u> &deg;C</u></span></div>
+          <div class="tel-i"><span class="lbl">power</span><span class="tel-v " data-rf="power_watts">23.6<u data-rf="power_cap_watts"> / 25 W</u></span></div>
+          <div class="tel-i"><span class="lbl">inflight</span><span class="tel-v is-hot" data-rf="inflight">3<u data-rf="engine_slots"> / 2 slots</u></span></div>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">models</span>
+          <div class="mcols">
+            <div class="mcol is-disk">
+              <span class="lbl">on disk &middot; 1</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">phi3.5:3.8b-mini-instruct-q4_0</div>
+              <div class="mi-m"><span data-rf="disk_bytes">2.04 GiB</span> on disk</div>
+            </div>
+            </div>
+            <div class="mcol is-res">
+              <span class="lbl">resident in vram &middot; 2</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">qwen2.5:7b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="vram_bytes">4.42 GiB</span> in vram &middot; used <span data-rf="last_used_ms">4 s</span> ago</div>
+            </div>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">llama3.2:3b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="vram_bytes">1.88 GiB</span> in vram &middot; used <span data-rf="last_used_ms">6 min 20 s</span> ago</div>
+            </div>
+            </div>
+          </div>
+        </div>
+        <div class="p-sec"><span class="lbl">why it matters</span><div class="p-note">slow per token, but two models stay resident. <b>inflight 3 &gt; 2 slots</b>, so t_queue is non-zero for the next request.</div></div>
+      </section>
+      <section class="insp" hidden data-insp="laptop-01" data-rf-item="node_detail">
+        <div class="p-h"><span class="p-id" data-rf="id">laptop-01</span><span class="p-ip" data-rf="ip">192.168.1.44</span></div>
+        <div class="p-gpu" data-rf="gpu_name">NVIDIA GeForce MX550 — 4 GB</div>
+        <div class="p-sec">
+          <div class="eng">
+            <span><i class="led is-on" data-rf="engine_healthy"></i><span data-rf="engine">lm-studio</span> up</span>
+            <span><i class="led " data-rf="telemetry_ok"></i>telemetry <span data-rf="telemetry_backend">none</span></span>
+            <span><i class="led " data-rf="residency_known"></i>residency unknown</span>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">vram</span>
+          <div class="bar-row"><span><b class="num" data-rf="vram_used_pct">25.0%</b> used</span><span><b class="num" data-rf="vram_free_bytes">3.00 GiB</b> free of <span class="num" data-rf="vram_total_bytes">4.00 GiB</span></span></div>
+          <div class="bar"><i class="b-used" data-rf="vram_used_pct" style="width:25.0%"></i><i class="b-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></div>
+          <div class="bar-key"><span><i class="bk bk-res"></i>resident 0.00</span><span><i class="bk bk-oth"></i>other 1.00</span><span><i class="bk bk-free"></i>free 3.00</span></div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">telemetry</span>
+          <div class="tel">
+          <div class="tel-i"><span class="lbl">gpu util</span><span class="tel-v is-unknown" data-rf="gpu_util">&mdash;</span></div>
+          <div class="tel-i"><span class="lbl">temperature</span><span class="tel-v is-unknown" data-rf="temperature_c">&mdash;</span></div>
+          <div class="tel-i"><span class="lbl">power</span><span class="tel-v is-unknown" data-rf="power_watts">&mdash;</span></div>
+          <div class="tel-i"><span class="lbl">inflight</span><span class="tel-v " data-rf="inflight">0<u data-rf="engine_slots"> / 1 slots</u></span></div>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">models</span>
+          <div class="mcols">
+            <div class="mcol is-disk">
+              <span class="lbl">on disk &middot; 3</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">qwen2.5:7b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">4.36 GiB</span> on disk</div>
+            </div>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">llama3.2:3b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">1.88 GiB</span> on disk</div>
+            </div>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">nomic-embed-text</div>
+              <div class="mi-m"><span data-rf="disk_bytes">0.26 GiB</span> on disk</div>
+            </div>
+            </div>
+            <div class="mcol is-res">
+              <span class="lbl">resident in vram &middot; ?</span>
+              <div class="p-note"><b>residency unknown</b><br>this engine does not report loaded models</div>
+            </div>
+          </div>
+        </div>
+        <div class="p-sec"><span class="lbl">why it matters</span><div class="p-note">no telemetry backend and no residency report: utilisation, temperature and power read <b>&mdash;</b>, and <b>t_load cannot be estimated</b> here.</div></div>
+      </section>
+      <section class="insp" hidden data-insp="nuc-01" data-rf-item="node_detail">
+        <div class="p-h"><span class="p-id" data-rf="id">nuc-01</span><span class="p-ip" data-rf="ip">192.168.1.57</span></div>
+        <div class="p-gpu" data-rf="gpu_name">Intel Arc A770 — 16 GB</div>
+        <div class="p-sec">
+          <div class="eng">
+            <span><i class="led is-off" data-rf="engine_healthy"></i><span data-rf="engine">lm-studio</span> down</span>
+            <span><i class="led is-on" data-rf="telemetry_ok"></i>telemetry <span data-rf="telemetry_backend">level_zero</span></span>
+            <span><i class="led is-on" data-rf="residency_known"></i>residency known</span>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">vram</span>
+          <div class="bar-row"><span><b class="num" data-rf="vram_used_pct">2.5%</b> used</span><span><b class="num" data-rf="vram_free_bytes">15.60 GiB</b> free of <span class="num" data-rf="vram_total_bytes">16.00 GiB</span></span></div>
+          <div class="bar"><i class="b-used" data-rf="vram_used_pct" style="width:2.5%"></i><i class="b-res is-zero" data-rf="vram_resident_pct" style="width:0.0%"></i></div>
+          <div class="bar-key"><span><i class="bk bk-res"></i>resident 0.00</span><span><i class="bk bk-oth"></i>other 0.40</span><span><i class="bk bk-free"></i>free 15.60</span></div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">telemetry</span>
+          <div class="tel">
+          <div class="tel-i"><span class="lbl">gpu util</span><span class="tel-v " data-rf="gpu_util">0%</span></div>
+          <div class="tel-i"><span class="lbl">temperature</span><span class="tel-v " data-rf="temperature_c">41<u> &deg;C</u></span></div>
+          <div class="tel-i"><span class="lbl">power</span><span class="tel-v " data-rf="power_watts">9.2<u data-rf="power_cap_watts"> / 190 W</u></span></div>
+          <div class="tel-i"><span class="lbl">inflight</span><span class="tel-v " data-rf="inflight">0<u data-rf="engine_slots"> / 2 slots</u></span></div>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">models</span>
+          <div class="mcols">
+            <div class="mcol is-disk">
+              <span class="lbl">on disk &middot; 2</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">qwen2.5:7b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">4.36 GiB</span> on disk</div>
+            </div>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">mistral-nemo:12b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">6.59 GiB</span> on disk</div>
+            </div>
+            </div>
+            <div class="mcol is-res">
+              <span class="lbl">resident in vram &middot; 0</span>
+              <div class="p-note"><b>nothing resident</b><br>every request here pays a cold load</div>
+            </div>
+          </div>
+        </div>
+        <div class="p-sec"><span class="lbl">why it matters</span><div class="p-note">engine unreachable for <b>3 min 12 s</b>. Telemetry still reports, so the card stays populated — but every candidate row rejects it with <b>engine_down</b>.</div></div>
+      </section>
+      <section class="insp" hidden data-insp="mini-01" data-rf-item="node_detail">
+        <div class="p-h"><span class="p-id" data-rf="id">mini-01</span><span class="p-ip" data-rf="ip">192.168.1.68</span></div>
+        <div class="p-gpu" data-rf="gpu_name">Apple M2 Pro — 32 GB unified memory</div>
+        <div class="p-sec">
+          <div class="eng">
+            <span><i class="led is-on" data-rf="engine_healthy"></i><span data-rf="engine">lm-studio</span> up</span>
+            <span><i class="led is-on" data-rf="telemetry_ok"></i>telemetry <span data-rf="telemetry_backend">metal</span></span>
+            <span><i class="led is-on" data-rf="residency_known"></i>residency known</span>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">vram</span>
+          <div class="bar-row"><span><b class="num" data-rf="vram_used_pct">37.5%</b> used</span><span><b class="num" data-rf="vram_free_bytes">20.00 GiB</b> free of <span class="num" data-rf="vram_total_bytes">32.00 GiB</span></span></div>
+          <div class="bar"><i class="b-used" data-rf="vram_used_pct" style="width:37.5%"></i><i class="b-res" data-rf="vram_resident_pct" style="width:13.8%"></i></div>
+          <div class="bar-key"><span><i class="bk bk-res"></i>resident 4.42</span><span><i class="bk bk-oth"></i>other 7.58</span><span><i class="bk bk-free"></i>free 20.00</span></div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">telemetry</span>
+          <div class="tel">
+          <div class="tel-i"><span class="lbl">gpu util</span><span class="tel-v " data-rf="gpu_util">11%</span></div>
+          <div class="tel-i"><span class="lbl">temperature</span><span class="tel-v " data-rf="temperature_c">47<u> &deg;C</u></span></div>
+          <div class="tel-i"><span class="lbl">power</span><span class="tel-v " data-rf="power_watts">18.4<u data-rf="power_cap_watts"> / 60 W</u></span></div>
+          <div class="tel-i"><span class="lbl">inflight</span><span class="tel-v " data-rf="inflight">1<u data-rf="engine_slots"> / 2 slots</u></span></div>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">models</span>
+          <div class="mcols">
+            <div class="mcol is-disk">
+              <span class="lbl">on disk &middot; 2</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">phi3.5:3.8b-mini-instruct-q4_0</div>
+              <div class="mi-m"><span data-rf="disk_bytes">2.04 GiB</span> on disk</div>
+            </div>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">mistral-nemo:12b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">6.59 GiB</span> on disk</div>
+            </div>
+            </div>
+            <div class="mcol is-res">
+              <span class="lbl">resident in vram &middot; 1</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">qwen2.5:7b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="vram_bytes">4.42 GiB</span> in vram &middot; used <span data-rf="last_used_ms">3 min 10 s</span> ago</div>
+            </div>
+            </div>
+          </div>
+        </div>
+        <div class="p-sec"><span class="lbl">why it matters</span><div class="p-note">last telemetry <b>94 s ago</b> against a 15 s limit, which is why scheduling rejects it with <b>node_stale</b> even though the engine answers.</div></div>
+      </section>
+      <div class="p-foot">
+        <span class="lbl">state reference &mdash; static markup, not live</span>
+        <div class="state-line" style="margin-top:12px">engine down &rarr; <b>nuc-01</b> &middot; telemetry none &rarr; <b>laptop-01</b> reads <b>&mdash;</b> &middot; residency unknown &rarr; <b>laptop-01</b> &middot; nothing resident &rarr; <b>nuc-01</b> &middot; inflight &gt; slots &rarr; <b class="warn">jetson-01</b></div>
+        <div style="margin-top:16px">
+        <div class="empty" data-rf-item="empty_nodes">
+          <div class="empty-t">No nodes registered</div>
+          <div class="empty-d">RouteFlow reads nodes.toml at start and accepts /register at runtime. Nothing has reported in yet, so the canvas is empty.</div>
+        </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+<template id="rf-tpl-node-inspector">
+      <section class="insp" data-insp="desktop-01" data-rf-item="node_detail">
+        <div class="p-h"><span class="p-id" data-rf="id">desktop-01</span><span class="p-ip" data-rf="ip">192.168.1.12</span></div>
+        <div class="p-gpu" data-rf="gpu_name">NVIDIA GeForce RTX 4060 Laptop GPU</div>
+        <div class="p-sec">
+          <div class="eng">
+            <span><i class="led is-on" data-rf="engine_healthy"></i><span data-rf="engine">ollama</span> up</span>
+            <span><i class="led is-on" data-rf="telemetry_ok"></i>telemetry <span data-rf="telemetry_backend">nvml</span></span>
+            <span><i class="led is-on" data-rf="residency_known"></i>residency known</span>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">vram</span>
+          <div class="bar-row"><span><b class="num" data-rf="vram_used_pct">59.4%</b> used</span><span><b class="num" data-rf="vram_free_bytes">3.25 GiB</b> free of <span class="num" data-rf="vram_total_bytes">8.00 GiB</span></span></div>
+          <div class="bar"><i class="b-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="b-res" data-rf="vram_resident_pct" style="width:55.3%"></i></div>
+          <div class="bar-key"><span><i class="bk bk-res"></i>resident 4.42</span><span><i class="bk bk-oth"></i>other 0.33</span><span><i class="bk bk-free"></i>free 3.25</span></div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">telemetry</span>
+          <div class="tel">
+          <div class="tel-i"><span class="lbl">gpu util</span><span class="tel-v " data-rf="gpu_util">7%</span></div>
+          <div class="tel-i"><span class="lbl">temperature</span><span class="tel-v " data-rf="temperature_c">52<u> &deg;C</u></span></div>
+          <div class="tel-i"><span class="lbl">power</span><span class="tel-v " data-rf="power_watts">15.7<u data-rf="power_cap_watts"> / 100 W</u></span></div>
+          <div class="tel-i"><span class="lbl">inflight</span><span class="tel-v " data-rf="inflight">0<u data-rf="engine_slots"> / 1 slots</u></span></div>
+          </div>
+        </div>
+        <div class="p-sec">
+          <span class="lbl">models</span>
+          <div class="mcols">
+            <div class="mcol is-disk">
+              <span class="lbl">on disk &middot; 2</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">llama3.2:3b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">1.88 GiB</span> on disk</div>
+            </div>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">nomic-embed-text</div>
+              <div class="mi-m"><span data-rf="disk_bytes">0.26 GiB</span> on disk</div>
+            </div>
+            </div>
+            <div class="mcol is-res">
+              <span class="lbl">resident in vram &middot; 1</span>
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">qwen2.5:7b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="vram_bytes">4.42 GiB</span> in vram &middot; used <span data-rf="last_used_ms">12 s</span> ago</div>
+            </div>
+            </div>
+          </div>
+        </div>
+        <div class="p-sec"><span class="lbl">why it matters</span><div class="p-note">cold load of <b>qwen2.5:7b</b> measured at <b>9.5 s</b> on this node — that is the number t_load is built from.</div></div>
+      </section>
+</template>
+<template id="rf-tpl-model-resident-row">
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">qwen2.5:7b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="vram_bytes">4.42 GiB</span> in vram &middot; used <span data-rf="last_used_ms">12 s</span> ago</div>
+            </div>
+</template>
+<template id="rf-tpl-model-disk-row">
+            <div class="mi" data-rf-item="model">
+              <div class="mi-n" data-rf="name">llama3.2:3b-instruct-q4_K_M</div>
+              <div class="mi-m"><span data-rf="disk_bytes">1.88 GiB</span> on disk</div>
+            </div>
+</template>
+<template id="rf-tpl-empty-nodes">
+        <div class="empty" data-rf-item="empty_nodes">
+          <div class="empty-t">No nodes registered</div>
+          <div class="empty-d">RouteFlow reads nodes.toml at start and accepts /register at runtime. Nothing has reported in yet, so the canvas is empty.</div>
+        </div>
+</template>
+<script>
+(function () {
+  var canvas = document.getElementById('rf-canvas');
+  var panel = document.getElementById('rf-insp');
+  var world = document.getElementById('rf-world');
+  canvas.addEventListener('click', function (e) {
+    if (world && world.getAttribute('data-dragged') === '1') { world.removeAttribute('data-dragged'); return; }
+    var el = e.target.closest('[data-node]');
+    if (!el) return;
+    var id = el.getAttribute('data-node');
+    Array.prototype.forEach.call(canvas.querySelectorAll('[data-node]'), function (n) {
+      n.classList.toggle('is-selected', n === el);
+    });
+    Array.prototype.forEach.call(panel.querySelectorAll('[data-insp]'), function (s) {
+      s.hidden = s.getAttribute('data-insp') !== id;
+    });
+    panel.scrollTop = 0;
+  });
+})();
+</script>
+<template id="rf-tpl-node">
+      <div class="node " data-rf-item="node" data-node="desktop-01" style="left:14.24%;top:17.11%;--i:0">
+        <span class="dev"><span class="dev-lvl" style="--vram:55%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="shock" aria-hidden="true"></span><span class="shock s2" aria-hidden="true"></span><svg width="46" height="62" viewBox="0 0 46 62" aria-hidden="true"><rect x="12" y="4" width="22" height="54" rx="2"></rect><line x1="17" y1="12" x2="29" y2="12"></line><line x1="17" y1="17" x2="29" y2="17"></line><line x1="17" y1="22" x2="29" y2="22"></line><circle cx="23" cy="50" r="2.5"></circle></svg></span>
+        <span class="node-id" data-rf="id">desktop-01</span>
+        <span class="node-sub"><span data-rf="ip">192.168.1.12</span> &middot; <span data-rf="gpu_name">RTX 4060 Laptop</span></span>
+        <span class="node-tel"><span data-rf="gpu_util">7%</span><span data-rf="temperature_c">52&deg;</span><span data-rf="power_watts">15.7 W</span></span>
+        <span class="node-vram" title="vram"><i class="vr-used" data-rf="vram_used_pct" style="width:59.4%"></i><i class="vr-res" data-rf="vram_resident_pct" style="width:55.3%"></i></span>
+        <span class="shelf">
+          <span class="m-res" data-rf="name">&#9679; qwen2.5:7b &middot; 4.42 GiB</span>
+          <span class="m-disk" data-rf="models_on_disk">llama3.2:3b &middot; nomic-embed-text: &middot; on disk</span>
+        </span>
+      </div>
+</template>
+<script>
+(function () {
+  var canvas = document.getElementById('rf-canvas');
+  var world = document.getElementById('rf-world');
+  if (!canvas || !world) return;
+  var svg = world.querySelector('.links');
+  var VW = 1180, VH = 760;
+  var view = { x: 0, y: 0, s: 1 };
+  var fitted = false;
+  function apply() {
+    world.style.transformOrigin = '0 0';
+    world.style.margin = '0';
+    world.style.top = '0';
+    world.style.left = '0';
+    world.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.s + ')';
+  }
+  function key(el) {
+    if (el.hasAttribute('data-node')) return el.getAttribute('data-node');
+    var it = el.getAttribute('data-rf-item');
+    if (it === 'hub') return 'hub';
+    if (it === 'client') return 'clients';
+    return null;
+  }
+  function points() {
+    var m = {};
+    Array.prototype.forEach.call(world.querySelectorAll('.node'), function (el) {
+      var k = key(el);
+      if (k) m[k] = { x: parseFloat(el.style.left) / 100 * VW, y: parseFloat(el.style.top) / 100 * VH };
+    });
+    return m;
+  }
+  function d(a, b) {
+    var dx = (b.x - a.x) * 0.45;
+    return 'M ' + a.x + ' ' + a.y + ' C ' + (a.x + dx) + ' ' + a.y + ', ' + (b.x - dx) + ' ' + b.y + ', ' + b.x + ' ' + b.y;
+  }
+  function relink() {
+    var m = points();
+    Array.prototype.forEach.call(svg.querySelectorAll('path'), function (p) {
+      var a = m[p.getAttribute('data-a')], b = m[p.getAttribute('data-b')];
+      if (a && b) p.setAttribute('d', d(a, b));
+    });
+  }
+  var drag = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    var n = e.target.closest('.node');
+    if (n) {
+      drag = { el: n, sx: e.clientX, sy: e.clientY, l: parseFloat(n.style.left), t: parseFloat(n.style.top), moved: false };
+      n.classList.add('is-drag');
+    } else {
+      drag = { pan: true, sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y };
+      canvas.classList.add('is-panning');
+    }
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    if (drag.pan) {
+      world.setAttribute('data-touched', '1');
+      view.x = drag.ox + (e.clientX - drag.sx);
+      view.y = drag.oy + (e.clientY - drag.sy);
+      apply();
+      return;
+    }
+    var box = world.getBoundingClientRect();
+    var px = (e.clientX - drag.sx) / box.width * 100;
+    var py = (e.clientY - drag.sy) / box.height * 100;
+    if (Math.abs(e.clientX - drag.sx) > 3 || Math.abs(e.clientY - drag.sy) > 3) drag.moved = true;
+    var nl = Math.min(96, Math.max(4, drag.l + px));
+    var nt = Math.min(94, Math.max(6, drag.t + py));
+    drag.el.style.left = nl.toFixed(2) + '%';
+    drag.el.style.top = nt.toFixed(2) + '%';
+    relink();
+  });
+  function end() {
+    if (!drag) return;
+    if (drag.el) drag.el.classList.remove('is-drag');
+    if (drag.moved) { world.setAttribute('data-dragged', '1'); world.setAttribute('data-touched', '1'); }
+    canvas.classList.remove('is-panning');
+    drag = null;
+  }
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var box = world.getBoundingClientRect();
+    var mx = e.clientX - box.left, my = e.clientY - box.top;
+    var ns = Math.min(1.9, Math.max(0.5, view.s * (e.deltaY < 0 ? 1.09 : 1 / 1.09)));
+    var k = ns / view.s;
+    view.x -= mx * (k - 1);
+    view.y -= my * (k - 1);
+    view.s = ns;
+    world.setAttribute('data-touched', '1');
+    apply();
+  }, { passive: false });
+  function fit() {
+    var rl = parseFloat(canvas.getAttribute('data-reserve-left') || 0);
+    var rr = parseFloat(canvas.getAttribute('data-reserve-right') || 0);
+    var cw = canvas.clientWidth, ch = canvas.clientHeight;
+    if (cw <= 0 || ch <= 0) return false;
+    var bw = Math.max(240, cw - rl - rr);
+    var s = Math.max(0.2, Math.min(bw / VW, ch / VH) * 0.92);
+    view.s = s;
+    view.x = rl + (bw - VW * s) / 2;
+    view.y = (ch - VH * s) / 2;
+    apply();
+    fitted = true;
+    return true;
+  }
+  var ro = null;
+  function refit() {
+    if (world.getAttribute('data-touched')) { if (ro) { ro.disconnect(); ro = null; } return; }
+    fit();
+  }
+  if (typeof ResizeObserver === 'function') {
+    ro = new ResizeObserver(refit);
+    ro.observe(canvas);
+  }
+  refit();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refit);
+  window.addEventListener('load', refit);
+  window.addEventListener('resize', refit);
+  requestAnimationFrame(refit);
+  function refit() {
+    if (world.getAttribute('data-touched')) return;
+    fit();
+  }
+  if (!fit()) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refit);
+    requestAnimationFrame(refit);
+    window.addEventListener('load', refit);
+  }
+  if (typeof ResizeObserver === 'function') { new ResizeObserver(refit).observe(canvas); }
+  var reset = document.getElementById('rf-view-reset');
+  if (reset) {
+    reset.addEventListener('click', function () {
+      fit();
+    });
+  }
+})();
+</script>
+<script>
+(function () {
+  var canvas = document.getElementById('rf-canvas');
+  if (!canvas) return;
+  var links = canvas.querySelectorAll('[data-rf-link]');
+  var nodes = canvas.querySelectorAll('.node');
+  function setFocus(id) {
+    canvas.classList.toggle('is-focusing', !!id);
+    Array.prototype.forEach.call(nodes, function (n) {
+      var k = n.getAttribute('data-node') || (n.getAttribute('data-rf-item') === 'hub' ? 'hub' : 'clients');
+      n.classList.toggle('is-focus', !!id && (k === id || k === 'hub' || k === 'clients'));
+    });
+    Array.prototype.forEach.call(canvas.querySelectorAll('.link,.link-glow,.link-flow'), function (p) {
+      var rf = p.getAttribute('data-rf-link');
+      p.classList.toggle('is-focus', !!id && (rf === id || rf === 'client'));
+    });
+  }
+  canvas.addEventListener('pointerover', function (e) {
+    var n = e.target.closest('.node[data-node]');
+    if (n) setFocus(n.getAttribute('data-node'));
+  });
+  canvas.addEventListener('pointerout', function (e) {
+    if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('.node[data-node]')) setFocus(null);
+  });
+  var order = [];
+  Array.prototype.forEach.call(canvas.querySelectorAll('.node[data-node]'), function (n) { order.push(n); });
+  var cur = -1;
+  document.addEventListener('keydown', function (e) {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    var d = 0;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') d = 1;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') d = -1;
+    if (!d) return;
+    e.preventDefault();
+    cur = (cur + d + order.length) % order.length;
+    var n = order[cur];
+    setFocus(n.getAttribute('data-node'));
+    n.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  var map = document.getElementById('rf-minimap');
+  if (map) {
+    var sync = function () {
+      Array.prototype.forEach.call(map.querySelectorAll('i'), function (dot) {
+        var k = dot.getAttribute('data-for');
+        var src = canvas.querySelector(k === 'hub' ? '[data-rf-item="hub"]' : (k === 'clients' ? '[data-rf-item="client"]' : '[data-node="' + k + '"]'));
+        if (!src) return;
+        dot.style.left = src.style.left;
+        dot.style.top = src.style.top;
+      });
+    };
+    sync();
+    canvas.addEventListener('pointermove', sync);
+  }
+  function count(el) {
+    var txt = el.firstChild;
+    if (!txt || txt.nodeType !== 3) return;
+    var raw = txt.nodeValue.trim();
+    var m = raw.match(/^(\d+(?:\.\d+)?)(.*)$/);
+    if (!m) return;
+    var end = parseFloat(m[1]), dec = (m[1].split('.')[1] || '').length, tail = m[2];
+    var t0 = null, dur = 780;
+    function step(ts) {
+      if (!t0) t0 = ts;
+      var k = Math.min(1, (ts - t0) / dur);
+      var e = 1 - Math.pow(1 - k, 3);
+      txt.nodeValue = (end * e).toFixed(dec) + tail;
+      if (k < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.tel-v, .tt, .node-tel span, .s-v'), count);
+})();
+</script>
+<script src="rf-bind.js"></script>
+</body>
+</html>
