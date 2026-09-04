@@ -273,6 +273,15 @@ load time is visible in the report tool and counted separately.
 Option 1 is the plan. Recorded as Open because it is not yet implemented and the
 Phase 2 exit criterion depends on it.
 
+**Update, Phase 1.** The simulated node reproduces the gap exactly — it emits
+`load_duration` on the Ollama-native shape and not on the OpenAI one, because it
+mirrors what the real engine does. That is the right fidelity to have, and it
+means the benchmark inherits the problem rather than papering over it: a
+streamed OpenAI bench run records `load_ms: null` on every cold start, so even
+in simulation there is currently nothing for Phase 2 to learn load bandwidth
+from. This moves option 1 from "needed eventually" to "needed before Phase 2
+starts".
+
 ### D20 — The hardware seed table is configuration, not a constant · Settled
 
 Found by the first Phase 1 comparison run, which produced a result that looked

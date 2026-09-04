@@ -72,6 +72,79 @@ def fmt(value, width=8, digits=0, unit=""):
     return f"{value:,.{digits}f}{unit}".rjust(width)
 
 
+def counterfactuals(ok):
+    """How much of the routing is actually attributable to model warmth?
+
+    A win on wall-clock does not by itself say *why*. Warmth also declines to
+    use a slow node, and any speed-aware policy would do that — so the honest
+    question is what changes when T_load is taken out of the score. Every record
+    carries the full per-candidate breakdown (D10), so this is answerable from
+    the trace with no extra runs.
+
+    Two counterfactual policies are replayed against each decision:
+
+      speed-only  minimises t_queue + t_prefill + t_decode + t_evict, ignoring
+                  warmth entirely but keeping every other term.
+      load-only   minimises t_load alone — a pure warmth bias with no notion of
+                  how fast a node is.
+
+    Where speed-only would have picked the same node, warmth contributed
+    nothing to that decision.
+    """
+    comparable = [r for r in ok
+                  if sum(1 for c in r.get("candidates", []) if c.get("admitted")) >= 2]
+    if not comparable:
+        return
+
+    def pick(candidates, key):
+        best, best_score = None, None
+        for c in candidates:
+            if not c.get("admitted"):
+                continue
+            score = key(c)
+            if score is None:
+                continue
+            if best_score is None or score < best_score:
+                best, best_score = c.get("node_id"), score
+        return best
+
+    def term(c, name):
+        value = c.get(name)
+        return 0.0 if value is None else value
+
+    same_as_speed = same_as_load = 0
+    load_swing_ms = []
+    for r in comparable:
+        candidates = r.get("candidates", [])
+        actual = r.get("node_id")
+        speed = pick(candidates, lambda c: (term(c, "t_queue") + term(c, "t_prefill")
+                                            + term(c, "t_decode") + term(c, "t_evict")))
+        load = pick(candidates, lambda c: term(c, "t_load"))
+        if speed == actual:
+            same_as_speed += 1
+        if load == actual:
+            same_as_load += 1
+        # How much predicted time the load term was worth on this decision:
+        # the spread of t_load across admitted candidates.
+        loads = [term(c, "t_load") for c in candidates if c.get("admitted")]
+        if len(loads) >= 2:
+            load_swing_ms.append(max(loads) - min(loads))
+
+    n = len(comparable)
+    speed_pct = same_as_speed / n * 100.0
+    print(f"  counterfactual over {n} decision(s) with a real choice:")
+    print(f"    a speed-only policy (no t_load) agrees {speed_pct:.0f}% of the time")
+    print(f"    a load-only policy  (t_load alone)  agrees "
+          f"{same_as_load / n * 100.0:.0f}% of the time")
+    if load_swing_ms:
+        print(f"    t_load spread across candidates: p50 "
+              f"{percentile(load_swing_ms, 0.5):,.0f} ms, "
+              f"p95 {percentile(load_swing_ms, 0.95):,.0f} ms")
+    if speed_pct >= 90:
+        print("    -> warmth changed almost nothing here; the win, if any, came "
+              "from node speed")
+
+
 def report(path, detail=False):
     records, parse_errors = load(path)
     print(f"\n=== {path} ===")
@@ -171,6 +244,8 @@ def report(path, detail=False):
     if rejects:
         print("  rejections  " + ", ".join(f"{k}={v}"
                                            for k, v in sorted(rejects.items())))
+
+    counterfactuals(ok)
 
     if detail:
         print()

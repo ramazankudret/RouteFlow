@@ -67,12 +67,18 @@ def post(router, path, payload, headers, timeout):
                 "error": str(exc)}
 
 
-def call(router, model, role, prompt_tokens, output_tokens, token, timeout, rng_stream):
+def call(router, model, role, prompt_tokens, output_tokens, token, timeout, rng_stream,
+         stream=True):
+    # Streaming by default, because that is what agent tooling does and because
+    # time-to-first-token only exists for a stream: on a buffered reply the
+    # first byte is the whole answer, so the router records ttft as null rather
+    # than as a number describing something else. A non-streamed bench run
+    # reports no TTFT at all, which §9 asks Phase 1 to publish.
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": make_prompt(rng_stream, prompt_tokens)}],
         "max_tokens": output_tokens,
-        "stream": False,
+        "stream": stream,
     }
     headers = {"X-RouteFlow-Role": role}
     if token:
@@ -119,7 +125,7 @@ def run_scenario(args):
         # puts a node with too little VRAM under eviction pressure.
         planner = call(args.router, PLANNER_MODEL, "planner",
                        rng.randint(900, 1500), rng.randint(110, 170),
-                       args.token, args.timeout, rng)
+                       args.token, args.timeout, rng, args.stream)
         results.append(planner)
         if not planner["ok"]:
             print(f"  round {round_index + 1}: planner failed: {planner['error']}",
@@ -130,7 +136,8 @@ def run_scenario(args):
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.subagents) as pool:
             futures = [pool.submit(call, args.router, WORKER_MODEL, "subagent",
                                    prompt, output, args.token, args.timeout,
-                                   random.Random(args.seed + round_index * 100 + i))
+                                   random.Random(args.seed + round_index * 100 + i),
+                                   args.stream)
                        for i, (prompt, output) in enumerate(jobs)]
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -157,6 +164,9 @@ def main():
     parser.add_argument("--seed", type=int, default=7,
                         help="fixes prompt and output sizes; same seed, same requests")
     parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--no-stream", dest="stream", action="store_false",
+                        help="send buffered requests; TTFT is then unmeasurable")
+    parser.set_defaults(stream=True)
     parser.add_argument("--token", help="bearer token, if the router requires one")
     parser.add_argument("--label", default="", help="printed with the summary")
     args = parser.parse_args()
@@ -193,7 +203,7 @@ def main():
     # the human-readable block above.
     print("RESULT " + json.dumps({
         "label": args.label, "policy": running or args.policy, "seed": args.seed,
-        "rounds": args.rounds, "subagents": args.subagents,
+        "rounds": args.rounds, "subagents": args.subagents, "stream": args.stream,
         "wall_s": round(wall, 3), "ok": len(ok), "failed": len(failed),
         "cold_starts": cold, "by_node": by_node,
     }))
