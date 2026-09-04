@@ -392,3 +392,34 @@ alongside the double for integer values, and the parser recovers one for any
 integer literal without a fraction or exponent. This was latent before
 `/snapshot` existed and would have bitten any future field above 2^53; the
 selftest now pins it.
+
+### D19 (revised) — not a blocker; the derivation closes on v1 fields · Settled
+
+I called this a blocker for Phase 2 and overstated it. Re-reading the schema
+before implementing the fix showed the fix is not needed.
+
+The proposal was a new `load_ms_source` field distinguishing engine-reported
+from derived load times. It is redundant. v1 already encodes the distinction in
+`load_ms` itself: `null` means unmeasured, `0` means the model was resident, and
+a positive value means the engine reported it. A reader can tell the three apart
+without being told.
+
+And load time *is* recoverable from a v1 trace without any new field, because
+`ttft_ms` on a cold start is load plus prefill and the two separate cleanly:
+
+1. Learn `prefill_rate` from **warm** records only, where `load_ms == 0` by
+   definition and `ttft` is therefore prefill alone.
+2. Subtract that prefill from `ttft` on **cold** records to get load.
+
+Step 1 draws only on records where load is known to be zero, so step 2 never
+feeds itself — no circularity. Both steps filter on `inflight_at_dispatch` for
+the same reason the prefill caveat gives: a rate measured while the engine was
+queueing is not a rate.
+
+Written into `docs/TRACE-SCHEMA.md` under Derived quantities, so Phase 2
+implements the bootstrap rather than rediscovering it.
+
+What remains true from the original entry: the OpenAI-compatible path reports no
+load duration, engine-reported values are better than derived ones, and Phase 2
+should weight them accordingly. What was wrong: that this stopped Phase 2 from
+starting. It does not. Phase 2 is unblocked.

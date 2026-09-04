@@ -144,6 +144,38 @@ load_bandwidth(node)      = footprint_observed / load_ms
 footprint_observed        = vram_free_before - vram_free_after   (cold loads only)
 ```
 
+**Recovering load time when the engine does not report it.** `load_ms` is null
+whenever the engine reports no load duration — which, on Ollama's
+OpenAI-compatible endpoint, is every cold start (D19). It does not follow that
+load bandwidth is unlearnable from a v1 trace: `ttft_ms` on a cold start *is*
+load plus prefill, and the two can be separated with a bootstrap that uses only
+fields already present.
+
+```
+1. prefill_rate(node, model)  from WARM records only
+       was_resident == true  and  inflight_at_dispatch < engine_slots
+       prefill_rate = prompt_tokens_actual / (ttft_ms - queue_wait_ms)
+   A warm record has load_ms == 0 by definition, so ttft is prefill alone.
+
+2. load_ms_derived            for COLD records only
+       was_resident == false and  inflight_at_dispatch == 0
+       load_ms_derived = ttft_ms - queue_wait_ms
+                       - prompt_tokens_actual / prefill_rate(node, model)
+
+3. load_bandwidth(node) = footprint / load_ms  where load_ms is engine-reported,
+   else footprint / load_ms_derived, weighted lower.
+```
+
+There is no circularity: step 1 draws only on records where load is known to be
+zero, so step 2 never feeds itself. The `inflight_at_dispatch` filters matter in
+both steps for the same reason as the caveat below — a rate measured while the
+engine was queueing is not a rate.
+
+A record where `load_ms` is a positive number came from the engine and is worth
+more than a derived one. No extra field is needed to tell them apart: `null`
+means unmeasured, `0` means the model was resident, and a positive value means
+the engine said so.
+
 **The prefill caveat.** `queue_wait_ms` measures only the router's own overhead.
 Time a request spends queued *inside* the engine is invisible to us — no engine
 reports it — so it lands inside `ttft_ms` and therefore inside
