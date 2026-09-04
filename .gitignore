@@ -1,0 +1,19 @@
+# Build
+build/
+cmake-build-*/
+*.o
+*.a
+compile_commands.json
+
+# Runtime artifacts — the trace is data, not source (docs/TRACE-SCHEMA.md)
+*.jsonl
+nodes.json
+router.json
+agent.json
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
