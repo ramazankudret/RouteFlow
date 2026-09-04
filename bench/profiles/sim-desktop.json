@@ -1,0 +1,31 @@
+{
+  "id": "sim-desktop",
+  "gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "vram_total_bytes": 8000000000,
+  "engine_slots": 1,
+  "load_bandwidth_bytes_per_ms": 1000000,
+  "contention_alpha": 1.0,
+  "jitter": 0.04,
+  "seed": 1001,
+  "idle_power_watts": 16,
+  "busy_power_watts": 92,
+  "power_cap_watts": 100,
+  "temperature_c": 54,
+  "models": [
+    {
+      "name": "planner:12b",
+      "disk_bytes": 6800000000,
+      "footprint_bytes": 7000000000,
+      "prefill_tokens_per_ms": 1.0,
+      "decode_tokens_per_ms": 0.03
+    },
+    {
+      "name": "worker:3b",
+      "disk_bytes": 1900000000,
+      "footprint_bytes": 2000000000,
+      "prefill_tokens_per_ms": 3.0,
+      "decode_tokens_per_ms": 0.09
+    }
+  ],
+  "resident_at_start": []
+}

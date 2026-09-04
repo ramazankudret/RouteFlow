@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "Router configuration for the Phase 1 comparison.",
+    "",
+    "cost.gpu_seeds describes the cluster's hardware to the static cost model.",
+    "The built-in table does not know these parts well enough: keying on a GPU",
+    "generation hands a laptop part a desktop flagship's bandwidth, and a cost",
+    "model that cannot tell a strong node from a weak one has nothing left to",
+    "rank on but warmth — which is precisely the bias this project must not have.",
+    "",
+    "These numbers are what an operator would write from a spec sheet, and they",
+    "are deliberately APPROXIMATE: each is within about 10% of the rate the",
+    "simulated node actually delivers, in both directions. Setting them exactly",
+    "would hand the cost model the answer and make the Phase 1 comparison",
+    "meaningless. Phase 2 is what removes the residual error, and it needs there",
+    "to be a residual error to remove."
+  ],
+
+  "http": { "bind": "127.0.0.1", "port": 8970 },
+  "poll_ms": 500,
+  "request_timeout_ms": 600000,
+
+  "cost": {
+    "gpu_seeds": [
+      { "match": "4060 laptop", "mem_bw_bytes_per_ms": 195e6,
+        "load_bw_bytes_per_ms": 0.85e6, "prefill_ratio": 33 },
+      { "match": "orin nx", "mem_bw_bytes_per_ms": 90e6,
+        "load_bw_bytes_per_ms": 1.10e6, "prefill_ratio": 33 },
+      { "match": "2050", "mem_bw_bytes_per_ms": 65e6,
+        "load_bw_bytes_per_ms": 0.45e6, "prefill_ratio": 33 }
+    ]
+  },
+
+  "scoring": {
+    "evict_weight": 0.5,
+    "warm_window_ms": 120000,
+    "node_stale_ms": 5000,
+    "contention_alpha": 1.0
+  }
+}

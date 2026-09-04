@@ -272,3 +272,74 @@ load time is visible in the report tool and counted separately.
 
 Option 1 is the plan. Recorded as Open because it is not yet implemented and the
 Phase 2 exit criterion depends on it.
+
+### D20 — The hardware seed table is configuration, not a constant · Settled
+
+Found by the first Phase 1 comparison run, which produced a result that looked
+like a verdict and was actually a bug: Warmth finished 32% *slower* than
+RoundRobin and sent 8 of 10 requests to the weakest node in the cluster.
+
+The cause was in `StaticCostModel`. Its seed table matched a substring of
+`gpu_name`, and the entries were keyed by GPU *generation* — `"rtx 40"`,
+`"rtx 20"`. Two of the three nodes matched nothing and both fell to the same
+generic default, so the cost model believed a fast desktop and a weak laptop
+had identical decode rates. With node speed invisible, the only signal left in
+the score was `T_load`, and Warmth dutifully sent everything to whichever node
+was already warm — including a node three times too slow for the work.
+
+This is worth stating plainly because of how it failed. Nothing crashed, no
+term was missing, every trace record was well-formed, and the decision
+breakdown was internally consistent. The scheduler explained its choices
+confidently and the explanations were wrong at the root, because one input was
+a fabricated constant.
+
+Two changes:
+
+1. **Generation-wide entries are gone.** Memory bandwidth varies more within a
+   GPU generation than between generations — a 4060 Laptop is 272 GB/s, a 4090
+   is 1008 — so a generation-wide entry silently hands a laptop part a desktop
+   flagship's throughput. The built-ins are now specific parts, with generation
+   fallbacks pinned to the conservative end of each.
+2. **`cost.gpu_seeds` in the router config is consulted first.** An operator
+   who knows their hardware states it, longest match wins, and no rebuild is
+   needed to teach the router about a machine it has not met. Unmatched
+   hardware still gets a generic seed, but now says so once per device: a wrong
+   seed is a routing error, and a routing error nobody is told about is the
+   worst kind.
+
+The Phase 1 bench ships `bench/router.json` with seeds for its simulated
+cluster, set deliberately within about 10% of the rates those nodes actually
+deliver, in both directions. Exact seeds would hand the cost model the answer
+and make the comparison meaningless; Phase 2 exists to remove a residual error,
+so there has to be one.
+
+This is also the first concrete argument for Phase 2 that did not come from the
+architecture document: a static table is not merely less accurate than a
+learned model, it is *silently* wrong on hardware nobody wrote an entry for,
+which on a heterogeneous cluster is the normal case.
+
+### D21 — The ledger prices duplicate loads; it does not forbid them · Settled
+
+Rev 2's §6.3 claimed that a second request for a model already loading on node A
+"queues behind the load instead of duplicating it", and called the herd problem
+and the duplicate-load problem "the same problem". Writing the test for it showed
+the claim was both stronger than the code and stronger than the truth.
+
+At the instant of reservation, `remaining_ms` on the loading node equals a fresh
+load elsewhere, so the two are priced identically — and that is correct. With
+VRAM free on both nodes, loading in parallel genuinely finishes sooner for the
+client than queueing one request behind the other's load *and* its generation.
+Refusing the duplicate would be slower, in exchange for VRAM nobody was
+competing for.
+
+The pathology worth preventing is narrower: loading the same model twice **while
+VRAM is scarce**, evicting other models to do it. `reserved_vram_bytes` covers
+that by making the loading node correctly look fuller to a concurrent scorer,
+and `T_evict` charges whoever displaces a warm model. The herd is broken by
+`T_queue` charging the busy node, not by a rule against duplication.
+
+The pending-load path still earns its place: a load that is 80% done is priced at
+20% of a fresh one, so a request arriving late in a load does queue behind it.
+
+§6.3 has been corrected. D4 stands — the ledger is still the fix for scoring
+against stale telemetry — but its scope is what the ledger actually does.

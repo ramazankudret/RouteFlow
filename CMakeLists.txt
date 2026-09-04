@@ -43,8 +43,10 @@ target_link_libraries(routeflow-agent PRIVATE rf_common ${CMAKE_DL_LIBS})
 
 # --- router -------------------------------------------------------------------
 
-add_executable(routeflow-router
-  router/main.cpp
+# The router's logic is a library so the policy and cost-model tests can link it
+# without going through a process and a socket. A test that has to start a
+# server to check which node a policy picks is not a unit test.
+add_library(rf_router STATIC
   router/core/admission.cpp
   router/core/dispatch.cpp
   router/core/ingest.cpp
@@ -55,8 +57,12 @@ add_executable(routeflow-router
   router/cost/static_cost_model.cpp
   router/policy/candidates.cpp
   router/policy/round_robin.cpp
+  router/policy/warmth.cpp
 )
-target_link_libraries(routeflow-router PRIVATE rf_common)
+target_link_libraries(rf_router PUBLIC rf_common)
+
+add_executable(routeflow-router router/main.cpp)
+target_link_libraries(routeflow-router PRIVATE rf_router)
 
 # --- tests --------------------------------------------------------------------
 
@@ -64,3 +70,7 @@ enable_testing()
 add_executable(rf_selftest tests/selftest.cpp)
 target_link_libraries(rf_selftest PRIVATE rf_common)
 add_test(NAME selftest COMMAND rf_selftest)
+
+add_executable(rf_policytest tests/policy_test.cpp)
+target_link_libraries(rf_policytest PRIVATE rf_router)
+add_test(NAME policytest COMMAND rf_policytest)

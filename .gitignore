@@ -5,12 +5,15 @@ cmake-build-*/
 *.a
 compile_commands.json
 
-# Runtime artifacts — the trace is data, not source (docs/TRACE-SCHEMA.md)
+# Runtime artifacts — the trace is data, not source (docs/TRACE-SCHEMA.md).
+# Anchored to the repository root: bench/ ships committed configuration with
+# these very names, and an unanchored pattern would silently swallow it.
 *.jsonl
-nodes.json
-router.json
-agent.json
+/nodes.json
+/router.json
+/agent.json
 *.log
+bench/results/
 
 # Editors / OS
 .vscode/

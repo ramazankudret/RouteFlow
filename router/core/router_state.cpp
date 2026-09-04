@@ -120,6 +120,8 @@ bool RouterState::set_policy(const std::string& name) {
     std::unique_ptr<IPolicy> next;
     if (name == "roundrobin-v1" || name == "roundrobin" || name == "round_robin")
         next = make_round_robin_policy();
+    else if (name == "warmth-v1" || name == "warmth")
+        next = make_warmth_policy();
     if (!next) return false;
 
     std::unique_lock<std::shared_mutex> lock(mu_);

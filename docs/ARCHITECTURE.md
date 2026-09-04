@@ -469,10 +469,19 @@ struct NodeLedger {
 ```
 
 Scoring consequence: if a model is already being loaded on node A, a second
-request for that model sees `T_load = remaining_ms` on A — usually far cheaper
-than a full cold load elsewhere — so it queues behind the load instead of
-duplicating it. The herd problem and the duplicate-load problem are the same
-problem, and the ledger is the single fix for both.
+request for that model sees `T_load = remaining_ms` on A rather than a full cold
+load, and node A's reserved VRAM makes it correctly look fuller to anyone else
+scoring against it.
+
+What the ledger guarantees is that both options are **priced**, not that the
+duplicate is always refused. Duplicating a cold load onto a second idle node
+with free VRAM is often the right answer: both nodes load in parallel and both
+requests run in parallel, which finishes sooner for the client than queueing one
+behind the other's load *and* its generation. The pathology worth preventing is
+narrower than "two nodes hold the same model" — it is loading the same model
+twice **while VRAM is scarce**, evicting other models to do it, and that is what
+`reserved_vram_bytes` and `T_evict` address. The herd is broken by `T_queue`
+charging the busy node, not by a rule against duplication.
 
 The reservation is taken in step 5 of §4.2, under the exclusive lock, after
 scoring and before the dispatch I/O begins.

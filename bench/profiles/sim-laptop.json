@@ -1,0 +1,33 @@
+{
+  "id": "sim-laptop",
+  "gpu_name": "NVIDIA GeForce RTX 2050 Laptop GPU",
+  "vram_total_bytes": 6000000000,
+  "engine_slots": 1,
+  "load_bandwidth_bytes_per_ms": 400000,
+  "contention_alpha": 1.0,
+  "jitter": 0.06,
+  "seed": 3003,
+  "idle_power_watts": 9,
+  "busy_power_watts": 48,
+  "power_cap_watts": 55,
+  "temperature_c": 66,
+  "models": [
+    {
+      "name": "planner:12b",
+      "disk_bytes": 6800000000,
+      "footprint_bytes": 7000000000,
+      "prefill_tokens_per_ms": 0.3,
+      "decode_tokens_per_ms": 0.009
+    },
+    {
+      "name": "worker:3b",
+      "disk_bytes": 1900000000,
+      "footprint_bytes": 2000000000,
+      "prefill_tokens_per_ms": 1.1,
+      "decode_tokens_per_ms": 0.034
+    }
+  ],
+  "resident_at_start": [
+    "worker:3b"
+  ]
+}

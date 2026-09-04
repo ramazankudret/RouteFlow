@@ -13,6 +13,22 @@
 
 namespace rf {
 
+// One row of the cost model's hardware seed table (§8: "a static table keyed by
+// GPU class so a fresh cluster is not useless on its first request").
+//
+// This is configuration, not a constant, because the built-in table is coarse
+// by construction: memory bandwidth varies more *within* a GPU generation than
+// between generations — a 4060 Laptop is 272 GB/s and a 4090 is 1008 — so
+// keying on a generation substring is a starting point, not an answer. An
+// operator who knows their hardware states it; Phase 2 learns the correction
+// either way.
+struct GpuSeed {
+    std::string match;      // case-insensitive substring of the device name
+    double mem_bw = 0;      // device memory bandwidth, bytes/ms (drives decode)
+    double load_bw = 0;     // storage -> VRAM, bytes/ms (drives T_load)
+    double prefill_ratio = 40;  // prefill tokens/ms as a multiple of decode
+};
+
 // Tunables that change how a score is computed. Kept in one struct so that a
 // policy comparison run can state its scoring configuration in one line, and so
 // that no term is controlled by a constant buried in a .cpp.
@@ -33,11 +49,18 @@ struct ScoringConfig {
     int64_t node_stale_ms = 5000;
 
     // Applied to a footprint estimate only while it has no observations (D2).
-    double footprint_margin = 1.15;
+    // 1.08, not the 1.15 rev 2 first specified: measured overhead on real
+    // hardware was 3.7% (see kKvBytesPerTokenPerGiB), and 15% plus a KV term
+    // put a 6.8 GB model over the top of an 8 GB card.
+    double footprint_margin = 1.08;
 
     // §6.2 contention prior: 1.0 is perfect fair-share, the physically correct
     // starting point for a saturated GPU.
     double contention_alpha = 1.0;
+
+    // Consulted before the built-in table, in order. Lets an operator describe
+    // hardware the built-ins do not recognise without a rebuild.
+    std::vector<GpuSeed> gpu_seeds;
 
     static ScoringConfig from_config(const class Config& cfg);
 };
@@ -92,6 +115,7 @@ public:
 };
 
 std::unique_ptr<IPolicy> make_round_robin_policy();
+std::unique_ptr<IPolicy> make_warmth_policy();
 
 std::unique_ptr<ICostModel> make_static_cost_model(const ScoringConfig& scoring);
 

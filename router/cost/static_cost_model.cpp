@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <mutex>
+#include <set>
 
 #include "common/config.h"
 #include "common/util.h"
@@ -26,48 +28,103 @@ namespace {
 
 constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
 
-// Seeds per GPU class. `mem_bw` is device memory bandwidth in bytes/ms;
-// `load_bw` is the rate at which weights reach VRAM from storage, which is a
-// different and much slower path.
+// Built-in hardware seeds, consulted after any operator-supplied ones.
+// `mem_bw` is device memory bandwidth in bytes/ms and drives decode; `load_bw`
+// is the storage-to-VRAM path and drives T_load. They are different paths and
+// do not track each other: a Jetson loads comparatively fast, because unified
+// memory means a load never crosses PCIe, while decoding comparatively slowly.
+//
+// The patterns are deliberately specific. An earlier version keyed on "rtx 40"
+// and "rtx 20", which is wrong in a way that matters: bandwidth varies more
+// *within* a generation than between them (a 4060 Laptop is 272 GB/s, a 4090
+// is 1008), so a generation-wide entry silently hands a laptop part a desktop
+// flagship's throughput — and a cost model that cannot tell a strong node from
+// a weak one has nothing left to rank on but warmth.
 struct GpuSeed {
-    const char* match;       // case-insensitive substring of the device name
-    double mem_bw;           // bytes per ms
-    double load_bw;          // bytes per ms
-    double prefill_ratio;    // prefill tokens/ms as a multiple of decode
+    const char* match;
+    double mem_bw;
+    double load_bw;
+    double prefill_ratio;
 };
 
-// Measured on this project's development machine where marked; the rest are
-// vendor figures. All of them are starting points, not claims.
 const GpuSeed kGpuSeeds[] = {
-    // Jetson: unified LPDDR5, and loading comes off the same memory, so the
-    // load path is unusually fast relative to the compute.
-    {"orin",     102e6,  1.2e6, 30},
-    {"xavier",    59e6,  0.8e6, 30},
-    {"jetson",    68e6,  1.0e6, 30},
-    // Ada laptop parts. 4060 Laptop: 272 GB/s; load_bw 0.5e6 bytes/ms was
-    // measured here (4.75 GB resident in ~9.5 s of load).
-    {"rtx 40",   272e6,  0.5e6, 45},
-    {"rtx 30",   448e6,  0.5e6, 45},
-    {"rtx 20",   448e6,  0.4e6, 40},
-    {"rtx 50",   896e6,  0.7e6, 50},
-    {"a100",   1555e6,  2.0e6, 60},
-    {"h100",   3350e6,  3.0e6, 60},
+    // Jetson / Tegra: unified LPDDR.
+    {"agx orin",      205e6, 1.5e6, 30},
+    {"orin nx",       102e6, 1.2e6, 30},
+    {"orin nano",      68e6, 1.0e6, 30},
+    {"orin",          102e6, 1.2e6, 30},
+    {"xavier",         59e6, 0.8e6, 30},
+    {"jetson",         68e6, 1.0e6, 30},
+    // Specific parts, before the generation fallbacks.
+    {"4060 laptop",   272e6, 0.5e6, 45},   // measured on this project's machine
+    {"4090",         1008e6, 1.0e6, 50},
+    {"4080",          717e6, 0.9e6, 50},
+    {"4070",          504e6, 0.7e6, 45},
+    {"3090",          936e6, 0.9e6, 45},
+    {"3080",          760e6, 0.9e6, 45},
+    {"3060",          360e6, 0.6e6, 45},
+    {"2050",          112e6, 0.4e6, 40},
+    {"a100",         1555e6, 2.0e6, 60},
+    {"h100",         3350e6, 3.0e6, 60},
+    // Generation fallbacks: the conservative end of each.
+    {"rtx 50",        672e6, 0.7e6, 50},
+    {"rtx 40",        272e6, 0.5e6, 45},
+    {"rtx 30",        360e6, 0.5e6, 45},
+    {"rtx 20",        224e6, 0.4e6, 40},
 };
 
 const GpuSeed kDefaultSeed = {"", 200e6, 0.5e6, 40};
 
-const GpuSeed& seed_for(const std::string& gpu_name) {
+// Config first, then built-ins, then the default. Longest match wins within a
+// tier, so "4060 laptop" beats "rtx 40".
+GpuSeed resolve_seed(const std::string& gpu_name,
+                     const std::vector<rf::GpuSeed>& configured) {
     const std::string name = lower(gpu_name);
-    for (const auto& s : kGpuSeeds)
-        if (name.find(s.match) != std::string::npos) return s;
+
+    const rf::GpuSeed* best_cfg = nullptr;
+    for (const auto& c : configured) {
+        if (c.match.empty() || name.find(lower(c.match)) == std::string::npos) continue;
+        if (!best_cfg || c.match.size() > best_cfg->match.size()) best_cfg = &c;
+    }
+    if (best_cfg)
+        return GpuSeed{best_cfg->match.c_str(), best_cfg->mem_bw, best_cfg->load_bw,
+                       best_cfg->prefill_ratio};
+
+    const GpuSeed* best = nullptr;
+    for (const auto& b : kGpuSeeds) {
+        if (name.find(b.match) == std::string::npos) continue;
+        if (!best || std::strlen(b.match) > std::strlen(best->match)) best = &b;
+    }
+    if (best) return *best;
+
+    // Unmatched hardware gets a generic seed and the operator is told, once.
+    // Guessing a node's speed in silence is how a scheduler ends up ranking a
+    // weak machine level with a strong one and then explaining it confidently.
+    static std::set<std::string> warned;
+    static std::mutex warned_mu;
+    {
+        std::lock_guard<std::mutex> lock(warned_mu);
+        if (warned.insert(name).second)
+            RF_WARN("no hardware seed for '%s'; using a generic one. Its decode "
+                    "and load estimates are guesses until Phase 2 learns them - "
+                    "add an entry under cost.gpu_seeds to fix that.",
+                    gpu_name.c_str());
+    }
     return kDefaultSeed;
 }
 
-// KV cache per token, seeded from weight size. A 7B q4 model with grouped-query
-// attention costs roughly 56-76 KB/token; scaling linearly with weights lands
-// in the right neighbourhood for the 3B-70B range this project targets. Phase 2
-// corrects it from the observed VRAM delta (D2).
-constexpr double kKvBytesPerTokenPerGiB = 16.0 * 1024.0;
+// KV cache per token, scaled by weight size. Calibrated against this project's
+// own measurement rather than guessed: qwen2.5:7b-instruct-q4_K_M is 4.683 GB
+// on disk and reports 4.748 GB resident, with free VRAM dropping by 4.858 GB
+// across the load — so weights plus KV plus CUDA context came to about 3.7%
+// over the on-disk size at Ollama's default context, not the ~20% the first
+// guess implied.
+//
+// Erring high is still the right direction (an over-estimate loses a candidate,
+// an under-estimate admits a node that cannot serve the request), but the first
+// value was high enough to make a 6.8 GB model un-admissible on an 8 GB card,
+// which is a machine that can obviously run it.
+constexpr double kKvBytesPerTokenPerGiB = 8.0 * 1024.0;
 
 // Used when the engine reports no size for a model at all. Deliberately large:
 // under-estimating a footprint admits a node that cannot serve the request,
@@ -123,7 +180,7 @@ public:
         e.conf = Confidence::Seeded;
         e.samples = 0;
 
-        const GpuSeed& seed = seed_for(node.gpu_name);
+        const GpuSeed seed = resolve_seed(node.gpu_name, scoring_.gpu_seeds);
         const uint64_t footprint = footprint_bytes(req.model, node, req.num_ctx);
         const double weights = std::max(1.0, static_cast<double>(footprint));
 
@@ -232,6 +289,22 @@ ScoringConfig ScoringConfig::from_config(const Config& cfg) {
     s.node_stale_ms = cfg.get_int("scoring.node_stale_ms", s.node_stale_ms);
     s.footprint_margin = cfg.get_num("scoring.footprint_margin", s.footprint_margin);
     s.contention_alpha = cfg.get_num("scoring.contention_alpha", s.contention_alpha);
+
+    const Json& seeds = cfg.get("cost.gpu_seeds");
+    for (size_t i = 0; i < seeds.size(); ++i) {
+        const Json& e = seeds.at(i);
+        rf::GpuSeed g;
+        g.match = e["match"].as_str();
+        g.mem_bw = e["mem_bw_bytes_per_ms"].as_num(0);
+        g.load_bw = e["load_bw_bytes_per_ms"].as_num(0);
+        g.prefill_ratio = e["prefill_ratio"].as_num(40);
+        if (g.match.empty() || g.mem_bw <= 0 || g.load_bw <= 0) {
+            RF_WARN("cost.gpu_seeds[%zu] ignored: needs a non-empty match and "
+                    "positive bandwidths", i);
+            continue;
+        }
+        s.gpu_seeds.push_back(std::move(g));
+    }
     return s;
 }
 

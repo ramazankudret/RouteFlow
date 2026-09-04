@@ -1,0 +1,33 @@
+{
+  "id": "sim-jetson",
+  "gpu_name": "NVIDIA Jetson Orin NX 16GB",
+  "vram_total_bytes": 15000000000,
+  "engine_slots": 1,
+  "load_bandwidth_bytes_per_ms": 1200000,
+  "contention_alpha": 1.0,
+  "jitter": 0.04,
+  "seed": 2002,
+  "idle_power_watts": 7,
+  "busy_power_watts": 24,
+  "power_cap_watts": 25,
+  "temperature_c": 71,
+  "models": [
+    {
+      "name": "planner:12b",
+      "disk_bytes": 6800000000,
+      "footprint_bytes": 7000000000,
+      "prefill_tokens_per_ms": 0.45,
+      "decode_tokens_per_ms": 0.014
+    },
+    {
+      "name": "worker:3b",
+      "disk_bytes": 1900000000,
+      "footprint_bytes": 2000000000,
+      "prefill_tokens_per_ms": 1.4,
+      "decode_tokens_per_ms": 0.042
+    }
+  ],
+  "resident_at_start": [
+    "planner:12b"
+  ]
+}
