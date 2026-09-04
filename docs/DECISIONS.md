@@ -352,3 +352,43 @@ The pending-load path still earns its place: a load that is 80% done is priced a
 
 §6.3 has been corrected. D4 stands — the ledger is still the fix for scoring
 against stale telemetry — but its scope is what the ledger actually does.
+
+### D22 — `/snapshot`: a read-only collector envelope · Settled
+
+NoteFlow aggregates several collectors onto one canvas. RouteFlow joins as the
+third, but in a different status from the others: AgentFlow and GPUFlow observe
+and touch nothing, while RouteFlow *manages* — it changes model residency,
+routes requests and evicts.
+
+So the integration is deliberately one-way. `GET /snapshot` publishes the read
+state RouteFlow already exposes, wrapped in the shared envelope. The control
+surface — `/v1/chat/completions`, `/api/chat`, `/api/generate`, `/admin/*` — is
+not reachable through it and gains no shortcut. Management stays in RouteFlow's
+own interface. This is not a concession: the control surface stays where it is
+while the observation data becomes visible on another plane.
+
+Three things this does *not* do, each of which would have been easy:
+
+- **No new measurement.** `nodes` is `registry.to_json()` verbatim;
+  `jobs_recent` counts records already retained for the UI's job feed. No new
+  counter, no new collection path, `ITelemetry` untouched.
+- **No new authentication path.** `/snapshot` sits behind the same bearer token
+  as every other read endpoint (D14). No loopback exemption, no separate key.
+- **No coupling of versions.** The envelope's `v` is the envelope's own and is
+  deliberately not tied to `TRACE-SCHEMA.md`. A trace bump to v2 leaves the
+  envelope at 1; the wrapper and the body have separate lifetimes.
+
+D8's discipline crosses the wire with the data. `p50_ms` over zero completed
+jobs is `null`, not `0` — a consumer renders `null` as "—" and would otherwise
+draw a latency nobody measured. Likewise a node whose engine cannot report
+residency is not listed as holding nothing; it is named in
+`residency_unknown_nodes` so the distinction survives the hop.
+
+**A defect this surfaced.** The envelope carries `now_ns`, an epoch timestamp in
+nanoseconds — about 1.8e18, well above the 2^53 ceiling for exact integers in a
+double. `Json` stored every number as a double, so the field both lost precision
+and serialised as `1.78854201051094e+18`. `Json` now keeps an exact `int64`
+alongside the double for integer values, and the parser recovers one for any
+integer literal without a fraction or exponent. This was latent before
+`/snapshot` existed and would have bitten any future field above 2^53; the
+selftest now pins it.

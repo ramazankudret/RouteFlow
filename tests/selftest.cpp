@@ -63,6 +63,21 @@ void test_json() {
     // null and 0 are distinct: load_ms:0 means resident, null means unmeasured.
     check(!rf::Json(0).is_null() && rf::Json().is_null(), "null is not zero");
 
+    // Integers above 2^53 must survive exactly. A double cannot hold them, and
+    // an epoch timestamp in nanoseconds is ~1.8e18 — stored as a double it both
+    // loses precision and prints as 1.79e+18, which is not what a consumer
+    // expecting an integer will parse.
+    const int64_t ns = 1788463371247802432LL;
+    check_eq(rf::Json(ns).dump(), "1788463371247802432",
+             "a nanosecond timestamp prints as an integer, not in exponent form");
+    rf::Json big;
+    check(rf::Json::parse(rf::Json(ns).dump(), big, &err) && big.as_i64() == ns,
+          "and round-trips through the parser unchanged");
+    check(rf::Json(9007199254740993LL).dump() == "9007199254740993",
+          "2^53+1 survives, which a double could not represent");
+    check_eq(rf::Json(static_cast<uint64_t>(21903073280ULL)).dump(), "21903073280",
+             "byte counts stay exact");
+
     check_eq(rf::Json(1.0).dump(), "1", "integral double prints without .0");
     check_eq(rf::Json(0.1).dump(), "0.1", "0.1 round-trips shortest");
     check_eq(rf::Json(1e300).dump(), "1e+300", "large double");

@@ -1,6 +1,7 @@
 #include "json.h"
 
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +17,12 @@ const Json& null_json() {
 
 // Shortest representation that round-trips. %.17g always round-trips but emits
 // noise like 0.10000000000000001; try shorter precisions first.
+void append_int(std::string& out, int64_t v) {
+    char buf[24];
+    std::snprintf(buf, sizeof buf, "%lld", static_cast<long long>(v));
+    out += buf;
+}
+
 void append_number(std::string& out, double v) {
     if (!std::isfinite(v)) {  // JSON has no NaN/Inf; null is the honest encoding.
         out += "null";
@@ -212,7 +219,21 @@ private:
             while (i_ < s_.size() && std::isdigit(static_cast<unsigned char>(s_[i_]))) ++i_;
         }
         if (!any) return fail("expected value");
-        out = Json(std::strtod(s_.substr(start, i_ - start).c_str(), nullptr));
+        const std::string text = s_.substr(start, i_ - start);
+        // No fraction and no exponent: parse it as an integer so a value above
+        // 2^53 survives a round trip through this parser unchanged.
+        if (text.find('.') == std::string::npos &&
+            text.find('e') == std::string::npos &&
+            text.find('E') == std::string::npos) {
+            errno = 0;
+            char* end = nullptr;
+            const long long v = std::strtoll(text.c_str(), &end, 10);
+            if (errno != ERANGE && end && *end == 0) {
+                out = Json(v);
+                return true;
+            }
+        }
+        out = Json(std::strtod(text.c_str(), nullptr));
         return true;
     }
 
@@ -267,15 +288,18 @@ private:
 }  // namespace
 
 int64_t Json::as_i64(int64_t def) const {
-    return type_ == Type::Number ? static_cast<int64_t>(num_) : def;
+    if (type_ != Type::Number) return def;
+    return has_int_ ? int_ : static_cast<int64_t>(num_);
 }
 uint64_t Json::as_u64(uint64_t def) const {
-    if (type_ != Type::Number || num_ < 0) return def;
-    return static_cast<uint64_t>(num_);
+    if (type_ != Type::Number) return def;
+    if (has_int_) return int_ < 0 ? def : static_cast<uint64_t>(int_);
+    return num_ < 0 ? def : static_cast<uint64_t>(num_);
 }
 uint32_t Json::as_u32(uint32_t def) const {
-    if (type_ != Type::Number || num_ < 0) return def;
-    return static_cast<uint32_t>(num_);
+    if (type_ != Type::Number) return def;
+    if (has_int_) return int_ < 0 ? def : static_cast<uint32_t>(int_);
+    return num_ < 0 ? def : static_cast<uint32_t>(num_);
 }
 
 bool Json::has(const std::string& key) const {
@@ -325,7 +349,10 @@ void Json::dump_to(std::string& out, int indent, int depth) const {
     switch (type_) {
         case Type::Null:   out += "null"; break;
         case Type::Bool:   out += bool_ ? "true" : "false"; break;
-        case Type::Number: append_number(out, num_); break;
+        case Type::Number:
+            if (has_int_) append_int(out, int_);
+            else append_number(out, num_);
+            break;
         case Type::String: append_escaped(out, str_); break;
         case Type::Array:
             if (arr_.empty()) { out += "[]"; break; }

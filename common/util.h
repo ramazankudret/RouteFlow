@@ -7,9 +7,13 @@
 
 namespace rf {
 
+// Project version. Reported in the collector envelope; not configurable.
+inline constexpr const char* kVersion = "0.1.0";
+
 // --- time -------------------------------------------------------------------
 
 int64_t now_ms();            // wall clock, epoch ms (timestamps in the trace)
+int64_t now_ns();            // wall clock, epoch ns (collector envelope only)
 int64_t mono_ms();           // monotonic ms (every duration we measure)
 
 // ISO-8601 UTC with milliseconds: 2026-09-03T14:21:07.412Z

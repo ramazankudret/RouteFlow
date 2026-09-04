@@ -20,12 +20,22 @@ public:
     Json(std::nullptr_t) {}
     explicit Json(bool v) : type_(Type::Bool), bool_(v) {}
     Json(double v) : type_(Type::Number), num_(v) {}
-    Json(int v) : type_(Type::Number), num_(static_cast<double>(v)) {}
-    Json(long v) : type_(Type::Number), num_(static_cast<double>(v)) {}
-    Json(long long v) : type_(Type::Number), num_(static_cast<double>(v)) {}
-    Json(unsigned v) : type_(Type::Number), num_(static_cast<double>(v)) {}
-    Json(unsigned long v) : type_(Type::Number), num_(static_cast<double>(v)) {}
-    Json(unsigned long long v) : type_(Type::Number), num_(static_cast<double>(v)) {}
+    // Integers keep an exact int64 alongside the double. A double holds
+    // integers exactly only below 2^53, and an epoch timestamp in nanoseconds
+    // is ~1.8e18 — storing one as a double both loses precision and prints as
+    // 1.78e+18, which is a number a consumer expecting an integer will not
+    // thank us for.
+    // `long long` is the primary; everything else delegates to it. Delegating
+    // via int64_t would be a self-call on LP64, where int64_t *is* long.
+    // Unsigned values above INT64_MAX would wrap, which nothing here produces:
+    // these carry byte counts, token counts and epoch times.
+    Json(long long v)
+        : type_(Type::Number), num_(static_cast<double>(v)), int_(v), has_int_(true) {}
+    Json(int v) : Json(static_cast<long long>(v)) {}
+    Json(long v) : Json(static_cast<long long>(v)) {}
+    Json(unsigned v) : Json(static_cast<long long>(v)) {}
+    Json(unsigned long v) : Json(static_cast<long long>(v)) {}
+    Json(unsigned long long v) : Json(static_cast<long long>(v)) {}
     Json(const char* v) : type_(Type::String), str_(v ? v : "") {}
     Json(std::string v) : type_(Type::String), str_(std::move(v)) {}
 
@@ -77,6 +87,8 @@ private:
     Type type_ = Type::Null;
     bool bool_ = false;
     double num_ = 0;
+    int64_t int_ = 0;     // exact value when has_int_; num_ is the lossy view
+    bool has_int_ = false;
     std::string str_;
     std::vector<Json> arr_;
     std::vector<std::pair<std::string, Json>> obj_;

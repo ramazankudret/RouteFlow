@@ -4,6 +4,7 @@
 //   POST /api/chat              Ollama-native ingest
 //   POST /api/generate          Ollama-native ingest
 //   GET  /v1/models             union of models on disk across the cluster
+//   GET  /snapshot              collector envelope (NoteFlow and friends)
 //   GET  /api/nodes             live cluster state (UI)
 //   GET  /api/jobs              recent trace records (UI)
 //   GET  /events                SSE: node state + job completions (UI)
@@ -11,12 +12,14 @@
 //   POST /admin/policy          runtime policy switch (§5)
 //   GET  /health                liveness, no auth
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <cstdio>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -51,7 +54,8 @@ void usage() {
         "\n"
         "  --http.bind ADDR           default 127.0.0.1; 0.0.0.0 requires --http.token\n"
         "  --http.port N              default 8970\n"
-        "  --http.token SECRET        bearer token required from clients\n"
+        "  --http.token SECRET        bearer token required from clients;\n"
+        "                             gates /snapshot too, with no exemption\n"
         "  --nodes PATH               nodes.json (default: nodes.json)\n"
         "  --node.token SECRET        bearer token presented to agents\n"
         "  --trace PATH               trace file (default: trace.jsonl)\n"
@@ -93,6 +97,49 @@ public:
         changed_.notify_all();
     }
 
+    // Summary over the retained window, for the collector envelope. Not a new
+    // measurement path — it counts records we already keep.
+    //
+    // D8's discipline applies across the wire too: a percentile of an empty set
+    // is not zero, it is unknown, and a consumer that draws "0 ms" from it would
+    // be acting on a number nobody measured.
+    rf::Json summary_json() const {
+        std::lock_guard<std::mutex> lock(mu_);
+        rf::Json j = rf::Json::object();
+        j["window"] = rf::Json(capacity_);
+        j["total"] = rf::Json(records_.size());
+
+        size_t failed = 0, cold = 0;
+        std::vector<double> totals;
+        totals.reserve(records_.size());
+        for (const auto& r : records_) {
+            if (r.outcome != rf::Outcome::Ok) {
+                ++failed;
+                continue;
+            }
+            if (!r.was_resident) ++cold;
+            totals.push_back(r.total_ms);
+        }
+        j["failed"] = rf::Json(failed);
+        j["cold_starts"] = rf::Json(cold);
+
+        if (totals.empty()) {
+            j["p50_ms"] = rf::Json();
+            j["p95_ms"] = rf::Json();
+        } else {
+            std::sort(totals.begin(), totals.end());
+            auto pct = [&totals](double q) {
+                const double pos = (totals.size() - 1) * q;
+                const size_t lo = static_cast<size_t>(pos);
+                const size_t hi = std::min(lo + 1, totals.size() - 1);
+                return totals[lo] + (totals[hi] - totals[lo]) * (pos - lo);
+            };
+            j["p50_ms"] = rf::Json(pct(0.5));
+            j["p95_ms"] = rf::Json(pct(0.95));
+        }
+        return j;
+    }
+
     rf::Json to_json(size_t limit) const {
         std::lock_guard<std::mutex> lock(mu_);
         rf::Json arr = rf::Json::array();
@@ -130,6 +177,37 @@ private:
     size_t capacity_;
     uint64_t version_ = 0;
 };
+
+// Which models are actually resident, and where.
+//
+// A node whose engine cannot report residency is NOT reported as holding
+// nothing — that would be the same lie as writing 0 for an unmeasured value
+// (§10, D3). It is named separately so a consumer can render it as unknown.
+rf::Json warm_models_json(const std::vector<rf::NodeState>& nodes,
+                          rf::Json& residency_unknown) {
+    std::map<std::string, std::vector<std::string>> by_model;
+    residency_unknown = rf::Json::array();
+
+    for (const auto& n : nodes) {
+        if (!n.engine_healthy) continue;
+        if (!n.residency_known) {
+            residency_unknown.push_back(rf::Json(n.id));
+            continue;
+        }
+        for (const auto& m : n.models_resident) by_model[m.name].push_back(n.id);
+    }
+
+    rf::Json out = rf::Json::array();
+    for (const auto& kv : by_model) {
+        rf::Json e = rf::Json::object();
+        e["model"] = rf::Json(kv.first);
+        rf::Json on = rf::Json::array();
+        for (const auto& id : kv.second) on.push_back(rf::Json(id));
+        e["nodes"] = std::move(on);
+        out.push_back(std::move(e));
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -286,6 +364,47 @@ int main(int argc, char** argv) {
             res.send_json(200, registry.to_json().dump());
             return;
         }
+        // Collector envelope. RouteFlow publishes the read state it already
+        // has under a shared wrapper; it adds no measurement and opens no new
+        // path to the control endpoints, which stay exactly where they are.
+        //
+        // The envelope version is the envelope's own. It is deliberately not
+        // tied to the trace schema version (docs/TRACE-SCHEMA.md): the two have
+        // separate lifetimes, and a trace bump to v2 leaves this at 1.
+        if (req.method == "GET" && req.path == "/snapshot") {
+            const std::vector<rf::NodeState> nodes = registry.snapshot();
+
+            rf::Json collector = rf::Json::object();
+            // Identity, not configuration: consumers key their card schemas on
+            // this slug, so it is a fixed string and no flag can change it.
+            collector["id"] = rf::Json("routeflow");
+            collector["kind"] = rf::Json("inference");
+            collector["version"] = rf::Json(rf::kVersion);
+            // What we are bound to. A router listening on 0.0.0.0 reports that
+            // literally rather than guessing which interface a reader reached
+            // it on — an invented address is worse than an obviously generic one.
+            collector["endpoint"] =
+                rf::Json("http://" + bind + ":" + std::to_string(server.port()));
+
+            rf::Json snapshot = rf::Json::object();
+            snapshot["v"] = rf::Json(1);
+            snapshot["collector"] = std::move(collector);
+            snapshot["now_ns"] = rf::Json(rf::now_ns());
+
+            // Body sits at the same level as the envelope, not nested.
+            snapshot["nodes"] = registry.to_json();
+            snapshot["jobs_recent"] = history.summary_json();
+            rf::Json residency_unknown;
+            snapshot["models_warm"] = warm_models_json(nodes, residency_unknown);
+            if (residency_unknown.size() > 0)
+                snapshot["residency_unknown_nodes"] = std::move(residency_unknown);
+            snapshot["policy"] = rf::Json(state.policy_name());
+            snapshot["cost_model"] = rf::Json(state.cost_model_name());
+
+            res.send_json(200, snapshot.dump());
+            return;
+        }
+
         if (req.method == "GET" && req.path == "/api/jobs") {
             const uint32_t limit =
                 static_cast<uint32_t>(std::atoi(req.param("limit", "100").c_str()));
