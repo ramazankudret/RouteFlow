@@ -393,6 +393,31 @@ integer literal without a fraction or exponent. This was latent before
 `/snapshot` existed and would have bitten any future field above 2^53; the
 selftest now pins it.
 
+**Two later additions to the envelope**, both in `collector`/top level and
+neither touching the body:
+
+- `collector.pid` — the router's own process id. It is what a passive observer
+  matches a socket's owner against when it checks the family's read
+  declarations against actual traffic, and it matches on pid rather than port
+  because a port is reused and a pid is not. Its limit is worth stating: a pid
+  only means something to an observer on the same host. A NoteFlow reading this
+  across a network gets a number it cannot resolve, and should ignore it rather
+  than treat it as an identity.
+- `reads` — which other collectors in the family this process reads. It is
+  `[]` here, and that is a claim rather than a gap: the router polls its own
+  agents, which are RouteFlow's components and not separate collectors, and it
+  reads no other flow. **Absent and empty are different.** A missing key means
+  the process has not joined the contract and nothing may be concluded from its
+  traffic; an empty array means "I read nobody" and can be checked against what
+  an observer sees. Do not drop the key to mean the same thing.
+
+Neither loosens anything above: `/snapshot` still requires the same bearer
+token, `collector.id` and `collector.kind` are still fixed strings, and the
+control surface is still unreachable through it. `tests/snapshot_auth.sh` pins
+all of that against the built binary — the handler is inline in `main()` behind
+a real socket, so a unit test cannot reach it, and these properties had nothing
+holding them before.
+
 ### D19 (revised) — not a blocker; the derivation closes on v1 fields · Settled
 
 I called this a blocker for Phase 2 and overstated it. Re-reading the schema

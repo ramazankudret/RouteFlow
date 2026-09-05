@@ -14,6 +14,8 @@
 //   POST /admin/cost_model      runtime cost-model switch
 //   GET  /health                liveness, no auth
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -517,11 +519,34 @@ int main(int argc, char** argv) {
             // it on — an invented address is worse than an obviously generic one.
             collector["endpoint"] =
                 rf::Json("http://" + bind + ":" + std::to_string(server.port()));
+            // Our own pid. Not a measurement — getpid() — but the field a
+            // passive observer matches a socket's owner against. NetFlow
+            // verifies the family's read declarations by watching loopback,
+            // and it matches on pid rather than port on purpose: a port is
+            // reused, a pid is not. Without this the router cannot be placed
+            // among the processes an observer can see, and every verdict about
+            // it is withheld.
+            collector["pid"] = rf::Json(static_cast<long long>(::getpid()));
 
             rf::Json snapshot = rf::Json::object();
             snapshot["v"] = rf::Json(1);
             snapshot["collector"] = std::move(collector);
             snapshot["now_ns"] = rf::Json(rf::now_ns());
+
+            // Which other collectors in the family this process reads.
+            //
+            // Empty, and that is a statement rather than a gap: the router
+            // polls its own agents, which are RouteFlow's components and not
+            // separate collectors, and it reads no other flow. An observer
+            // that sees this router open a connection to AgentFlow or GPUFlow
+            // is therefore looking at something undeclared, and should say so.
+            //
+            // The distinction that matters here is absent versus empty. A
+            // missing key means "this process has not joined the contract" and
+            // nothing may be concluded from its traffic; an empty array means
+            // "I read nobody" and can be checked. Do not drop the key to mean
+            // the same thing.
+            snapshot["reads"] = rf::Json::array();
 
             // Body sits at the same level as the envelope, not nested.
             snapshot["nodes"] = cluster_json(registry, state);
