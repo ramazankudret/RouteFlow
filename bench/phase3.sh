@@ -55,14 +55,32 @@ cleanup() { pkill -f '[r]outeflow-(agent|router)' 2>/dev/null || true; }
 trap cleanup EXIT
 cleanup; sleep 1
 
+# The pressure profiles, not the Phase 1/2 cluster. The first version started
+# sim-desktop and sim-jetson here while nodes.json labelled their ports
+# pressure-a and pressure-b, so every trace carried pressure node names over the
+# agent workload, and the campaign measured the scenario this script's own
+# header says it is not using.
 start_agents() {
-  "${BIN}/routeflow-agent" --simulate "${PROFILES}/sim-desktop.json" \
-      --http.port 8981 --node.id sim-desktop --log.level warn >/dev/null 2>&1 &
-  "${BIN}/routeflow-agent" --simulate "${PROFILES}/sim-jetson.json" \
-      --http.port 8982 --node.id sim-jetson --log.level warn >/dev/null 2>&1 &
-  "${BIN}/routeflow-agent" --simulate "${PROFILES}/sim-laptop.json" \
-      --http.port 8983 --node.id sim-laptop --log.level warn >/dev/null 2>&1 &
+  "${BIN}/routeflow-agent" --simulate "${PROFILES}/pressure-a.json" \
+      --http.port 8981 --node.id pressure-a --log.level warn >/dev/null 2>&1 &
+  "${BIN}/routeflow-agent" --simulate "${PROFILES}/pressure-b.json" \
+      --http.port 8982 --node.id pressure-b --log.level warn >/dev/null 2>&1 &
   sleep 2
+}
+
+# Two mislabelled ports were enough to run the wrong experiment for a whole
+# campaign and report it as this one, so the cluster is checked before anything
+# is measured rather than trusted because the file names look right.
+verify_cluster() {
+  local models
+  models=$(curl -s -m 3 http://127.0.0.1:8970/api/nodes \
+           | grep -o '"name":"[^"]*"' | sort -u | tr '\n' ' ')
+  case "${models}" in
+    *hot:4b*) : ;;
+    *) echo "not the pressure cluster: ${models}" >&2
+       echo "expected hot:4b and cold-*:4b from bench/profiles/pressure-*.json" >&2
+       exit 3 ;;
+  esac
 }
 
 cat > "${OUT}/nodes.json" <<'JSON'
@@ -95,7 +113,13 @@ run_once() {
     sleep 0.5
   done
 
+  verify_cluster
+
+  # --scenario pressure is the whole point of this phase and it was
+  # missing: the default is the agent workload, so the campaign re-ran
+  # Phases 1 and 2 under Phase 3 labels.
   python3 "${REPO}/bench/loadgen.py" --router http://127.0.0.1:8970 \
+      --scenario pressure \
       --rounds "${ROUNDS}" --subagents "${SUBAGENTS}" --seed "${SEED}" \
       --label "${label}" 2>/dev/null | tee /dev/stderr \
       | grep '^RESULT ' | sed 's/^RESULT //' >> "${OUT}/results.jsonl" || true

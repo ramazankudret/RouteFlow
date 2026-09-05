@@ -1,5 +1,39 @@
 # Phase 3 result
 
+> ## ⚠ Retracted — this campaign ran the wrong scenario
+>
+> Everything below was measured on the **agent** workload from Phases 1 and 2,
+> not on the pressure workload it claims. `bench/phase3.sh` was broken in two
+> independent places:
+>
+> - `start_agents()` launched `sim-desktop.json`, `sim-jetson.json` and
+>   `sim-laptop.json` — the Phase 1/2 cluster. `pressure-a.json` and
+>   `pressure-b.json` were written, committed, and never started.
+> - The `loadgen.py` call omitted `--scenario pressure`, so it ran the default
+>   agent scenario.
+>
+> `nodes.json` labelled ports 8981 and 8982 `pressure-a` and `pressure-b`, so
+> every trace carried pressure node *names* over agent *models*. That is what
+> made the mistake survive review: the files looked right. Each run's own
+> `results.jsonl` line records `"scenario": "agent"`, which is what eventually
+> gave it away.
+>
+> **The numbers below are real; the experiment they describe is not.** Placement
+> performing zero preloads with identical cold starts is exactly what this
+> script's own header predicts for the agent workload, and says nothing about
+> placement under pressure. The conclusion — that reactive placement is
+> redundant — is withdrawn, not disproved: it was never tested.
+>
+> The placement diagnostic quoted below, naming `hot:4b` and `cold-b:4b`, cannot
+> have come from this campaign, whose traces contain neither. It came from a
+> manual run during development and should not have been presented as the
+> campaign's own output.
+>
+> The harness is fixed and now verifies the cluster it is measuring before it
+> measures anything. See `docs/PHASE3-RESULTS-PRESSURE.md` for the corrected
+> campaign.
+
+
 **Verdict: the exit criterion is not met.** §9 asks for the cold-start count to
 drop substantially against LRU. It did not drop at all — 4 per run in both arms,
 identical in all five runs, with zero preloads performed.

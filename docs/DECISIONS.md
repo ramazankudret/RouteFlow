@@ -606,3 +606,69 @@ have filled.
 
 Capped predictions are untouched: with a cap, `predict_output` returns the cap
 before it ever reaches the error EWMA, so no Phase 2 result moves.
+
+### D32 — The Phase 3 campaign measured the wrong scenario · Settled
+
+`bench/phase3.sh` ran the agent workload from Phases 1 and 2 and I reported it
+as the pressure workload. Two independent bugs, either of which alone would have
+done it:
+
+- `start_agents()` launched `sim-desktop.json`, `sim-jetson.json` and
+  `sim-laptop.json`. `pressure-a.json` and `pressure-b.json` were written,
+  committed, and never started.
+- The `loadgen.py` call omitted `--scenario pressure`, so the default agent
+  scenario ran.
+
+It survived review because `nodes.json` labelled ports 8981 and 8982
+`pressure-a` and `pressure-b`. Every trace therefore carried pressure node
+*names* over agent *models*, and every filename said pressure. What gave it away
+was the field the load generator writes about itself: `"scenario": "agent"` on
+all ten runs — recorded because a result labelled with the scenario we *meant*
+to run would lie silently, which is the same reasoning that put `policy` in
+`RESULT` back in Phase 1.
+
+The harness now calls `verify_cluster` before measuring anything, and refuses to
+run if the models it can see are not the pressure set. Checked in both
+directions: it catches the Phase 1/2 profile started under a pressure node name,
+and it passes the real pressure cluster. A guard that refuses everything is not
+a guard.
+
+The lesson is not "read the script more carefully". It is that a benchmark
+should assert the world it thinks it is in, because the file names, the node
+names and the output paths all agreed with each other and all of them were
+wrong.
+
+### D33 — Predictive placement: measured, declined, closed · Settled
+
+§9 defers predictive placement to Phase 4 and declines to commit to it. D17 says
+to reconsider with Phase 3's trace in hand. Reconsidered, on the corrected
+pressure campaign, and **not built**.
+
+Two conditions have to hold. Only one does.
+
+**The next model is predictable.** A first-order Markov predictor scores 63.7%
+against a 55.6% base rate over six models, and conditional entropy falls from
+2.00 to 1.27 bits. D17's stated doubt — that a single cluster accumulates
+transition data too slowly — does not hold here.
+
+**There is no time to act on it.** Half the pressure scenario's wall-clock is
+model loading, and an oracle predictor recovers none of it: 0 of 45 cold starts
+could have been hidden. The largest idle lead anywhere in the campaign is
+1,256 ms; the shortest load actually measured is 1,601 ms. That comparison uses
+only measured values and needs no model.
+
+Two independent measurements agree — the live manager skipped every cycle for
+lack of an idle node, and a trace replay done afterwards by different means
+found the same absence.
+
+Prediction changes *when you decide*, not *whether there is a window to act in*.
+So this is a decision rather than another deferral: building it would produce a
+second component that is provably correct and provably never runs.
+
+What would reopen it is a workload with idle capacity — spare nodes, or bursty
+traffic with real gaps between turns. Both benchmarks here are closed loops that
+issue the next request the moment the last returns, and that closed loop is
+precisely what removes the idle time. It is an artefact of the harness, not of
+local inference, and it is the strongest argument against this decision.
+`bench/predictive_ceiling.py` answers the question on any trace, so reopening it
+is a measurement and not an argument.
