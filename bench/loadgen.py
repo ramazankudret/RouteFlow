@@ -135,14 +135,45 @@ def active_policy(router, token):
         return None
 
 
+def think(args, rng, round_index):
+    """The gap a human leaves between turns.
+
+    Both benchmarks are closed loops: the next request goes out the moment the
+    last one returns, so the cluster is never idle and a placement manager never
+    gets a window to preload into. That is a property of the harness, not of
+    local inference -- an interactive agent session is quiet while somebody
+    reads the answer and types the next thing.
+
+    PHASE4-DECISION.md names this as the condition that would reopen predictive
+    placement, so it has to be measurable rather than argued about.
+
+    The jitter comes from a *separate* stream. Drawing it from the same RNG that
+    picks models would advance that stream and change which models the run asks
+    for, so a think-time run and a closed-loop run would differ in two ways at
+    once and neither could be attributed. Same seed, same request sequence, at
+    every think value -- which is what D12 is for.
+    """
+    if args.think_ms <= 0:
+        return 0.0
+    seconds = args.think_ms / 1000.0 * (0.5 + rng.random())
+    time.sleep(seconds)
+    return seconds
+
+
 def run_pressure(args):
     """Skewed access over a working set larger than any node's VRAM."""
     rng = random.Random(args.seed)
+    # Its own stream, so pauses cannot move the model sequence (see think()).
+    think_rng = random.Random(args.seed ^ 0x7417)
     results = []
     started = time.monotonic()
+    idle = 0.0
     cold_cycle = 0
 
     for round_index in range(args.rounds):
+        if round_index:
+            idle += think(args, think_rng, round_index)
+
         batch = []
         for _ in range(args.subagents + 1):
             if rng.random() < PRESSURE_HOT_SHARE:
@@ -171,7 +202,9 @@ def run_pressure(args):
         print(f"  round {round_index + 1}/{args.rounds} done "
               f"({time.monotonic() - started:.1f}s elapsed)", file=sys.stderr)
 
-    return results, time.monotonic() - started
+    # Wall-clock now contains time nobody was waiting on the cluster, so it is
+    # returned separately rather than quietly folded into the primary metric.
+    return results, time.monotonic() - started - idle
 
 
 def run_scenario(args):
@@ -233,6 +266,11 @@ def main():
                              "than VRAM (Phase 3)")
     parser.add_argument("--no-stream", dest="stream", action="store_false",
                         help="send buffered requests; TTFT is then unmeasurable")
+    parser.add_argument("--think-ms", type=int, default=0,
+                        help="mean pause between rounds, imitating a human turn. "
+                             "Zero (the default) is a closed loop: the next "
+                             "request goes out the moment the last returns, and "
+                             "the cluster is never idle")
     parser.add_argument("--uncapped", dest="capped", action="store_false",
                         help="omit max_tokens, as most agent callers do. The node "
                              "then draws the reply length itself and the router "
@@ -277,7 +315,7 @@ def main():
         "label": args.label, "policy": running or args.policy, "seed": args.seed,
         "rounds": args.rounds, "subagents": args.subagents, "stream": args.stream,
         "capped": args.capped,
-        "scenario": args.scenario,
+        "scenario": args.scenario, "think_ms": args.think_ms,
         "wall_s": round(wall, 3), "ok": len(ok), "failed": len(failed),
         "cold_starts": cold, "by_node": by_node,
     }))

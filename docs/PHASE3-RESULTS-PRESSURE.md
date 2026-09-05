@@ -6,8 +6,16 @@ retraction and the two harness bugs behind it. This is the corrected campaign:
 six models on two nodes that hold two each, accessed with a skew, which is what
 `bench/phase3.sh` always said it was doing.
 
-**Verdict: the exit criterion is still not met — for a completely different
-reason, and a more useful one.**
+**Verdict: it depends on whether the workload ever goes idle, and that turned
+out to be the whole story.**
+
+- **Back-to-back traffic: not met.** Cold starts 9 vs 9, zero preloads. The
+  manager is starved rather than satisfied — it skips every cycle because the
+  node is never free, which is the retracted report's conclusion replaced by a
+  different and more useful one.
+- **With 8 s gaps between turns: met.** Cold starts 9 → 8, wall-clock −6.3% at
+  25/25 pairwise, p95 flat. And the oracle ceiling on those traces is 5 hideable
+  cold starts, of which the manager took 5.
 
 ## Numbers
 
@@ -83,8 +91,77 @@ load. Two situations plausibly provide it and neither is in this scenario:
   seconds between bursts hands the manager exactly the window it needs. This
   scenario is back-to-back by construction.
 
-Both are untested, and the second is the more interesting: it is what an
-interactive agent session actually looks like between a human's turns.
+The first is untested. The second is measured in the next section, because
+leaving it as a caveat would have meant publishing a verdict while knowing which
+experiment could overturn it.
+
+## With think time, placement earns its keep
+
+The section above names the condition that would give the manager a window:
+traffic with real gaps. `loadgen.py --think-ms` adds one — a pause between
+rounds, imitating a human reading an answer before typing the next thing. At a
+mean of 8 s with ±50% jitter the gaps run 4-12 s against a 3.7 s load, so the
+window genuinely exists.
+
+Same seed, same request sequence, same cluster. Only the pauses are new.
+
+| | LRU | placement |
+| --- | ---: | ---: |
+| **wall-clock median (s)** | 86.24 | **80.82** |
+| — pairwise | | **25/25**, p < 0.05 |
+| **cold starts per run** | 9 | **8** |
+| — first touch | 4.2 | 4.0 |
+| — **repeat after eviction** | 4.8 | **4.0** |
+| **preloads per run** | — | **1** |
+| total p50 (ms) | 1,681 | 1,631 |
+| total p95 (ms) | 4,918 | 4,917 |
+
+**The exit criterion is met on this workload.** Cold starts fall and p95 does
+not regress — it is flat, which is what the guard asks for, rather than flat
+because nothing happened.
+
+The mechanism is exactly where it should be. First-touch cold starts barely
+move: no preload can remove the first time a model is ever asked for. What falls
+is **repeat after eviction**, 4.8 to 4.0 — the one kind a preload can prevent.
+One preload per run, one fewer repeat cold start per run.
+
+### The interesting part: reactive placement took the whole ceiling
+
+`bench/predictive_ceiling.py` on the LRU arm of this campaign asks how many cold
+starts an oracle could have hidden given the idle time actually available:
+
+```
+                     closed loop      8 s think
+cold starts               45              45
+fully hidden by oracle     0               5
+```
+
+Reactive placement removed **5** — 45 cold starts against LRU's 45, 40 with
+placement on, across five runs. The oracle ceiling is 5. **The manager captured
+all of it.**
+
+That is worth more than the wall-clock number. The gaps only fall between
+rounds, so roughly one request in five follows one, and only five of those land
+on a model that is both cold and loadable in the window. The ceiling is small —
+and a reactive manager watching demand takes every bit of it without predicting
+anything.
+
+### A defect in this measurement, found and fixed before reporting
+
+The first version of `think()` drew its jitter from the same RNG that picks
+models, so switching think time on also changed which models the run asked for.
+The two arms still shared a seed, so LRU-versus-placement was sound, but the
+comparison *across* think values had two variables moving and D12 exists to
+prevent exactly that. The pause now has its own stream, and the request sequence
+is identical at every think value — asserted, not assumed.
+
+The numbers above are from the corrected run. The uncorrected one said 8 vs 7
+cold starts and −3.6% wall-clock, so the finding held either way, but only one
+of them can be compared with the closed-loop campaign.
+
+**Wall-clock here includes the pauses.** `bench/summarize.py` derives it from
+trace timestamps, so 86 s against the closed loop's 61 s is mostly the 32 s of
+think time, not slower work. Only the within-campaign delta means anything.
 
 ## Honest limits of the measurement
 
@@ -110,9 +187,10 @@ interactive agent session actually looks like between a human's turns.
 | `PlacementManager` using `IEngineAdapter::preload` / `evict` | done |
 | Reactive: keep frequently-requested models resident, evict the stale | done (D27) |
 | Compared against plain LRU | done, five runs, on the intended scenario |
-| **Exit criterion:** cold starts drop substantially, no p95 regression | **not met** — 9 vs 9; the manager never acted |
+| **Exit criterion:** cold starts drop substantially, no p95 regression | **met with idle time, not without.** Back-to-back: 9 vs 9, no action possible. With 8 s turn gaps: 9 → 8 and p95 flat — though one preload per run is a modest reading of "substantially", and it is all the idle time on offer allowed |
 
-Placement stays implemented and **off by default**. The machinery is verified
-against a simulated node (load, then evict, both through the adapter), the
-skip-when-busy rule is correct and is what prevents the p95 regression, and the
-component is ready for a workload that leaves it room. This one does not.
+Placement stays implemented and **off by default**, which is now a judgement
+rather than a shrug: it earns its keep only where traffic leaves gaps, and
+turning it on costs nothing where it does not, because the skip-when-busy rule
+makes it inert rather than harmful. An operator whose traffic is interactive
+should turn it on. An operator saturating the cluster should not bother.

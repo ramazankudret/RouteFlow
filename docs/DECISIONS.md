@@ -638,6 +638,32 @@ should assert the world it thinks it is in, because the file names, the node
 names and the output paths all agreed with each other and all of them were
 wrong.
 
+### D34 — Placement is worth having, but only where traffic leaves gaps · Settled
+
+Phase 3 failed its exit criterion on back-to-back traffic and met it on the same
+scenario with 8 s pauses between turns: cold starts 9 → 8, wall-clock −6.3% at
+25/25 pairwise, p95 flat, one preload per run. The cold starts it removes are
+the repeat-after-eviction kind, which is the only kind a preload can remove.
+
+So placement is not redundant and not essential. It is conditional, and the
+condition is measurable: does the target node go idle for longer than the model
+takes to load? `bench/predictive_ceiling.py` answers that on any trace, and the
+answer swung from 0 of 45 hideable to 5 of 45 purely by adding think time.
+
+It therefore stays **off by default** as a judgement rather than a hedge. Where
+traffic is saturated the skip-when-busy rule makes it inert rather than harmful,
+so the cost of leaving it on is zero; where traffic is interactive it pays. The
+default is set for the case an operator is more likely to be measuring than
+running.
+
+A defect found while measuring this, and fixed before the numbers were reported:
+`think()` drew its jitter from the RNG that picks models, so enabling think time
+also changed the request sequence. Both arms still shared it, so the comparison
+within a campaign held, but the comparison *across* think values moved two
+variables at once — which is what D12 exists to prevent. The pause has its own
+stream now, and the sequence is asserted identical at every think value rather
+than assumed.
+
 ### D33 — Predictive placement: measured, declined, closed · Settled
 
 §9 defers predictive placement to Phase 4 and declines to commit to it. D17 says
@@ -665,10 +691,17 @@ Prediction changes *when you decide*, not *whether there is a window to act in*.
 So this is a decision rather than another deferral: building it would produce a
 second component that is provably correct and provably never runs.
 
-What would reopen it is a workload with idle capacity — spare nodes, or bursty
-traffic with real gaps between turns. Both benchmarks here are closed loops that
-issue the next request the moment the last returns, and that closed loop is
-precisely what removes the idle time. It is an artefact of the harness, not of
-local inference, and it is the strongest argument against this decision.
-`bench/predictive_ceiling.py` answers the question on any trace, so reopening it
-is a measurement and not an argument.
+The strongest argument against this was that both benchmarks are closed loops,
+which is an artefact of the harness rather than of local inference. So it was
+tested rather than argued: with 8 s gaps the ceiling rises from 0 of 45 hideable
+cold starts to 5, and **reactive placement takes all five** (D34).
+
+That closes the objection in the decision's favour. On the workload where
+predictive placement finally has room, something simpler already fills it, and
+prediction would compete for zero remaining headroom. The argument improved from
+"there is no window" to "there is a window and it is already occupied".
+
+What is still open is spare capacity — a node idle because nothing needs it,
+which two busy nodes cannot pose. `bench/predictive_ceiling.py` answers the
+question on any trace, so reopening this stays a measurement and not an
+argument.

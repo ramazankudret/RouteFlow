@@ -32,6 +32,7 @@ RUNS=5
 ROUNDS=5
 SUBAGENTS=4
 SEED=7
+THINK_MS=0
 BIN="${HOME}/rf-build"
 OUT="bench/results-phase3"
 
@@ -41,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --rounds)    ROUNDS="$2"; shift 2 ;;
     --subagents) SUBAGENTS="$2"; shift 2 ;;
     --seed)      SEED="$2"; shift 2 ;;
+    --think-ms)  THINK_MS="$2"; shift 2 ;;
     --bin)       BIN="$2"; shift 2 ;;
     --out)       OUT="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -119,7 +121,7 @@ run_once() {
   # missing: the default is the agent workload, so the campaign re-ran
   # Phases 1 and 2 under Phase 3 labels.
   python3 "${REPO}/bench/loadgen.py" --router http://127.0.0.1:8970 \
-      --scenario pressure \
+      --scenario pressure --think-ms "${THINK_MS}" \
       --rounds "${ROUNDS}" --subagents "${SUBAGENTS}" --seed "${SEED}" \
       --label "${label}" 2>/dev/null | tee /dev/stderr \
       | grep '^RESULT ' | sed 's/^RESULT //' >> "${OUT}/results.jsonl" || true

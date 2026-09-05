@@ -85,6 +85,28 @@ That is why this is a decision and not another deferral. Building it would
 produce a component that is measurably correct and measurably never runs — which
 is what Phase 3 already produced, and doing it twice would be the mistake.
 
+## The reopening condition was tested, and it fired
+
+Rather than leave the condition above as a caveat, it was measured. `loadgen.py`
+gained `--think-ms`, a pause between rounds imitating a human turn, and Phase 3
+was re-run with 8 s gaps against a 3.7 s load.
+
+**Reactive placement started working.** Cold starts 9 → 8 per run, wall-clock
+−6.3% at 25/25 pairwise, p95 flat. One preload per run, and the cold starts it
+removed are the repeat-after-eviction kind — the only kind a preload can remove.
+`docs/PHASE3-RESULTS-PRESSURE.md` has the campaign.
+
+**That strengthens this decision rather than weakening it.** The oracle ceiling
+on the same traces is **5 of 45** cold starts hideable, up from 0 in the closed
+loop. Reactive placement removed **5**. It captured the entire ceiling, watching
+demand and predicting nothing.
+
+So on the workload where predictive placement finally has room to act, a
+reactive manager already occupies all of it. Prediction would be competing for
+zero remaining headroom. The earlier argument was "there is no window"; the
+better one is "there is a window, it is small, and something simpler already
+fills it".
+
 ## What would reopen it
 
 Not a better model. A workload with idle capacity, which means one of:
@@ -93,11 +115,9 @@ Not a better model. A workload with idle capacity, which means one of:
   costs nothing and takes as long as it likes. Both scenarios here keep every
   node busy. This is the most likely place for predictive placement to pay, and
   it is a cluster-shape question, not a prediction question.
-- **Bursty traffic with real gaps.** An interactive agent session is quiet
-  between a human's turns — tens of seconds, against a 3.7 s load. That is a
-  window, and it is the realistic case this project has never benchmarked,
-  because both scenarios are closed loops that issue the next request as soon as
-  the last one returns.
+- ~~**Bursty traffic with real gaps.**~~ Tested — see above. It opens a window,
+  reactive placement fills all of it, and predictive placement is left with
+  nothing to add. This condition is now closed rather than open.
 
 If either is measured and shows idle time exceeding load time, `predictive_ceiling.py`
 will say so on that trace, and this decision should be revisited. The tool
@@ -111,8 +131,12 @@ exists precisely so that reopening it is a measurement rather than an argument.
 - **Not that placement is wrong.** It ships implemented and off, with its
   skip-when-busy rule intact — that rule is the reason placement did not cause
   the p95 regression §9 forbids.
-- **Not a general result.** Two simulated scenarios, one cluster shape, closed-
-  loop load generation. The closed loop is the specific thing that removes idle
-  time, and it is an artefact of the benchmark, not of local inference. That is
-  stated as the strongest argument *against* this decision, and it is why the
-  reopening conditions above are written down rather than left implied.
+- **Not a general result.** Three simulated campaigns now, one cluster shape.
+  The closed-loop objection has been answered by measurement rather than
+  argument; the remaining one is spare capacity, which is a cluster-shape
+  question this project has not been able to pose with two nodes that are both
+  busy.
+- **The ceiling is small enough to be scenario-specific.** Five hideable cold
+  starts out of 45 comes from gaps that fall only between rounds. A workload
+  with a gap after *every* request would have a larger ceiling, and whether
+  reactive placement would still capture all of it is untested.

@@ -1,0 +1,4 @@
+{ "nodes": [
+    { "id": "pressure-a", "endpoint": "127.0.0.1:8981" },
+    { "id": "pressure-b", "endpoint": "127.0.0.1:8982" }
+] }
