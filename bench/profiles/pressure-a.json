@@ -17,42 +17,54 @@
       "disk_bytes": 2850000000,
       "footprint_bytes": 3000000000,
       "prefill_tokens_per_ms": 1.8,
-      "decode_tokens_per_ms": 0.055
+      "decode_tokens_per_ms": 0.055,
+      "output_tokens_min": 40,
+      "output_tokens_max": 90
     },
     {
       "name": "cold-a:4b",
       "disk_bytes": 2850000000,
       "footprint_bytes": 3000000000,
       "prefill_tokens_per_ms": 1.8,
-      "decode_tokens_per_ms": 0.055
+      "decode_tokens_per_ms": 0.055,
+      "output_tokens_min": 40,
+      "output_tokens_max": 90
     },
     {
       "name": "cold-b:4b",
       "disk_bytes": 2850000000,
       "footprint_bytes": 3000000000,
       "prefill_tokens_per_ms": 1.8,
-      "decode_tokens_per_ms": 0.055
+      "decode_tokens_per_ms": 0.055,
+      "output_tokens_min": 40,
+      "output_tokens_max": 90
     },
     {
       "name": "cold-c:4b",
       "disk_bytes": 2850000000,
       "footprint_bytes": 3000000000,
       "prefill_tokens_per_ms": 1.8,
-      "decode_tokens_per_ms": 0.055
+      "decode_tokens_per_ms": 0.055,
+      "output_tokens_min": 40,
+      "output_tokens_max": 90
     },
     {
       "name": "cold-d:4b",
       "disk_bytes": 2850000000,
       "footprint_bytes": 3000000000,
       "prefill_tokens_per_ms": 1.8,
-      "decode_tokens_per_ms": 0.055
+      "decode_tokens_per_ms": 0.055,
+      "output_tokens_min": 40,
+      "output_tokens_max": 90
     },
     {
       "name": "cold-e:4b",
       "disk_bytes": 2850000000,
       "footprint_bytes": 3000000000,
       "prefill_tokens_per_ms": 1.8,
-      "decode_tokens_per_ms": 0.055
+      "decode_tokens_per_ms": 0.055,
+      "output_tokens_min": 40,
+      "output_tokens_max": 90
     }
   ],
   "resident_at_start": [

@@ -7,12 +7,15 @@ is the point. A single-model workload has no warmth to be aware of, and a
 workload with no concurrency never exercises the queue or contention terms.
 
 Reproducibility is a requirement, not a nicety (D12): prompt sizes and output
-lengths come from a seeded RNG, and `max_tokens` is always set explicitly so a
-simulated node performs exactly the modelled amount of work. Two runs with the
-same seed issue byte-identical requests.
+lengths come from a seeded RNG, so two runs with the same seed issue
+byte-identical requests. By default `max_tokens` is set explicitly, which makes
+a simulated node perform exactly the modelled amount of work — but it also
+hands the router the one number it is supposed to predict, so `--uncapped`
+withholds it and lets the node draw the length from the same range instead.
 
   python3 bench/loadgen.py --router http://127.0.0.1:8970 --rounds 6
   python3 bench/loadgen.py --policy warmth-v1 --rounds 6 --seed 42
+  python3 bench/loadgen.py --uncapped --rounds 5     # output length unknown
 
 Wall-clock is printed here because it is the metric Phase 1 is judged on; every
 other number comes from the trace file via bench/trace_report.py.
@@ -81,7 +84,7 @@ def post(router, path, payload, headers, timeout):
 
 
 def call(router, model, role, prompt_tokens, output_tokens, token, timeout, rng_stream,
-         stream=True):
+         stream=True, capped=True):
     # Streaming by default, because that is what agent tooling does and because
     # time-to-first-token only exists for a stream: on a buffered reply the
     # first byte is the whole answer, so the router records ttft as null rather
@@ -90,9 +93,14 @@ def call(router, model, role, prompt_tokens, output_tokens, token, timeout, rng_
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": make_prompt(rng_stream, prompt_tokens)}],
-        "max_tokens": output_tokens,
         "stream": stream,
     }
+    # `output_tokens` is drawn either way, so the RNG stream — and therefore
+    # every prompt size — is identical between capped and uncapped runs. Only
+    # whether the caller *states* the number changes. Uncapped, the node draws a
+    # length from the same range itself and the router has to predict it.
+    if capped:
+        payload["max_tokens"] = output_tokens
     headers = {"X-RouteFlow-Role": role}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -151,7 +159,7 @@ def run_pressure(args):
                                    rng.randint(300, 600), rng.randint(40, 90),
                                    args.token, args.timeout,
                                    random.Random(args.seed + round_index * 100 + i),
-                                   args.stream)
+                                   args.stream, args.capped)
                        for i, model in enumerate(batch)]
             for future in futures:
                 result = future.result()
@@ -180,7 +188,7 @@ def run_scenario(args):
         # puts a node with too little VRAM under eviction pressure.
         planner = call(args.router, PLANNER_MODEL, "planner",
                        rng.randint(900, 1500), rng.randint(110, 170),
-                       args.token, args.timeout, rng, args.stream)
+                       args.token, args.timeout, rng, args.stream, args.capped)
         results.append(planner)
         if not planner["ok"]:
             print(f"  round {round_index + 1}: planner failed: {planner['error']}",
@@ -192,7 +200,7 @@ def run_scenario(args):
             futures = [pool.submit(call, args.router, WORKER_MODEL, "subagent",
                                    prompt, output, args.token, args.timeout,
                                    random.Random(args.seed + round_index * 100 + i),
-                                   args.stream)
+                                   args.stream, args.capped)
                        for i, (prompt, output) in enumerate(jobs)]
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -225,7 +233,12 @@ def main():
                              "than VRAM (Phase 3)")
     parser.add_argument("--no-stream", dest="stream", action="store_false",
                         help="send buffered requests; TTFT is then unmeasurable")
-    parser.set_defaults(stream=True)
+    parser.add_argument("--uncapped", dest="capped", action="store_false",
+                        help="omit max_tokens, as most agent callers do. The node "
+                             "then draws the reply length itself and the router "
+                             "has to predict it — which is the only way the "
+                             "learned output-length model is exercised at all")
+    parser.set_defaults(stream=True, capped=True)
     parser.add_argument("--token", help="bearer token, if the router requires one")
     parser.add_argument("--label", default="", help="printed with the summary")
     args = parser.parse_args()
@@ -263,6 +276,7 @@ def main():
     print("RESULT " + json.dumps({
         "label": args.label, "policy": running or args.policy, "seed": args.seed,
         "rounds": args.rounds, "subagents": args.subagents, "stream": args.stream,
+        "capped": args.capped,
         "scenario": args.scenario,
         "wall_s": round(wall, 3), "ok": len(ok), "failed": len(failed),
         "cold_starts": cold, "by_node": by_node,

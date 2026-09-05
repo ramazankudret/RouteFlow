@@ -26,6 +26,10 @@ struct SimModelProfile {
     uint64_t footprint_bytes = 0;      // VRAM when resident
     double prefill_tokens_per_ms = 1;  // prompt processing rate
     double decode_tokens_per_ms = 0.02;
+    // How long this model's replies are when the caller states no cap, which is
+    // what most agent traffic does. Zero leaves the flat fallback in place.
+    uint32_t output_tokens_min = 0;
+    uint32_t output_tokens_max = 0;
 };
 
 struct SimProfile {

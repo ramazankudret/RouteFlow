@@ -507,3 +507,77 @@ Placement calls also go to the node's dispatch endpoint, which is the agent
 (D18), not to the engine directly. The agent already proxies these paths for
 inference; opening a second route to a port that is meant to stay on loopback
 would undo D18 for no gain.
+
+### D29 — An uncapped reply gets a length drawn from the model, not a constant · Settled
+
+Phase 2 shipped with output-length learning never once exercised: every request
+the load generator sent carried `max_tokens`, a cap beats anything inferred, so
+both arms returned the cap and the learned EWMA sat unused. Measuring the
+uncapped case means the simulated node has to decide the length itself.
+
+A constant would have been worse than not testing. An EWMA converges on a
+constant instantly and with zero error, so the learned arm would "win" against
+a thing that does not exist. The node instead draws uniformly from a per-model
+range, and the ranges are the ones the capped scenario was already using
+— planner 110-170, sub-agent 40-90 — so the workload is unchanged in
+distribution and only *who states the length* is different.
+
+The draw is a hash of (node seed, model, prompt) rather than a step of a shared
+RNG. Sub-agent calls arrive concurrently, so a shared stream would hand out
+lengths in thread-completion order and the scenario would stop replaying
+identically (D12). Hashing the request also makes the length a property of the
+request, which is what it is in reality.
+
+### D30 — The trace records the model's prediction, not the caller's cap · Settled
+
+`predicted_output_tokens` was written from `RequestFeatures`, which holds the
+caller's `max_tokens`. With a cap present the two agree exactly, so nothing
+looked wrong for the whole of Phase 2. Uncapped, the field was **zero**, and a
+zero is indistinguishable from "no prediction": the length error became
+unmeasurable, and `LearnedCostModel::observe` skipped its error EWMA entirely,
+leaving sigma pinned to a guessed 50% of the mean forever.
+
+So the loop was open in exactly the case it exists for. It could learn the mean
+and never learn how wrong the mean was.
+
+`Estimate` now carries the prediction it priced, and dispatch reads it off the
+winning candidate, falling back to the caller's cap only when there is no
+winner. Capped records are byte-identical to before, so no existing result
+moves and the schema keeps its version — the field's meaning was always
+"from the cost model"; the code just was not doing it.
+
+This was found by running the measurement, not by reading the code. The capped
+campaign could not have exposed it: with a cap, predicted equals actual equals
+cap, and every number in the panel looks perfect.
+
+### D31 — Sigma is the model's own residual, not the one in the record · Settled
+
+`observe()` measured output-length error as |actual − `predicted_output_tokens`|,
+taking the prediction from the record. But a record's prediction belongs to
+whichever model wrote it, and the learned arm is deliberately fed a trace
+written by the static one (D25) so it never learns from its own measurement.
+The static model predicts a flat 256 tokens; the replies are 40-90. So the
+learned model opened every uncapped run believing its own error was ~190
+tokens, when the mean it had learned was within ~3.
+
+The measured effect, before the fix: sigma started at 192 tokens and decayed
+only to 50 across a run, 122 of 125 decisions came back `within_noise`, and
+97% of jobs landed inside a band claiming to be 1-sigma.
+
+`within_noise` is a label, not a fallback — the policy still picks the minimum
+— so routing was unharmed, and the corrected campaign confirms it: wall-clock
+moved 74.42 s to 74.15 s, inside variance. The harm was to what the system
+says about itself. A console reporting that 98% of its choices are
+indistinguishable from noise, on a workload it actually fits to 16%, is
+describing a scheduler nobody should trust, and §6.2 spends that band on real
+comparisons. After the fix: 59 of 125, matching the capped campaign exactly,
+and coverage of 48% — now somewhat *under* the 68% a 1-sigma band claims, which
+is stated here rather than tuned away.
+
+The residual is now measured against this model's own prior, read before the
+mean is updated. That is what "how wrong am I" means, it is well-defined on a
+trace from any source, and it no longer depends on a field the writer may not
+have filled.
+
+Capped predictions are untouched: with a cap, `predict_output` returns the cap
+before it ever reaches the error EWMA, so no Phase 2 result moves.

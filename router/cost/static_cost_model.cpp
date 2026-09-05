@@ -58,6 +58,8 @@ public:
             (1.0 + scoring_.contention_alpha * (concurrent - 1.0));
 
         const OutputPrediction out = predict_output(req);
+        e.predicted_output_tokens = out.tokens;
+        e.predicted_output_sigma = out.sigma;
         e.t_decode_ms =
             static_cast<double>(out.tokens) / std::max(1e-9, effective_decode);
 

@@ -75,8 +75,8 @@ metric and is never combined into a single number with timing error (§8).
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `predicted_output_tokens` | int | |
-| `predicted_output_sigma` | number | 1-sigma, tokens. |
+| `predicted_output_tokens` | int | The **cost model's** prediction, not the caller's `max_tokens`. They coincide whenever the caller caps, because a cap is a real upper bound and every model returns it unchanged; they differ exactly when the caller does not, which is the only case where the prediction is doing any work. Falls back to the caller's cap when there is no winning candidate to have predicted anything. |
+| `predicted_output_sigma` | number | 1-sigma, tokens. From the same prediction. |
 | `predicted_total_ms` | number | Winner's `Estimate::total_ms()`. |
 | `predicted_sigma_ms` | number | Winner's `Estimate::sigma_ms`. |
 

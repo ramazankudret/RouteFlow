@@ -20,8 +20,10 @@
 //                               lower — load derived from a cold start's ttft
 //                               once prefill is known.
 //   output_len(model, role)     tokens generated, with a companion EWMA of
-//                               absolute error that becomes sigma. §8 insists
-//                               these two errors stay apart, and they do.
+//                               absolute error that becomes sigma — measured
+//                               against this model's own prior, never against
+//                               the prediction stored in the record (D31).
+//                               §8 insists the two errors stay apart, and they do.
 //   warm_job_ms(node)           for T_queue, excluding cold starts (D6).
 //
 // The split is the point. Fitting one function to "how long will this take"
@@ -148,6 +150,8 @@ public:
         const double effective_decode = decode / (1.0 + alpha * (concurrent - 1.0));
 
         const OutputPrediction out = predict_output(req);
+        e.predicted_output_tokens = out.tokens;
+        e.predicted_output_sigma = out.sigma;
         e.t_decode_ms =
             static_cast<double>(out.tokens) / std::max(1e-9, effective_decode);
 
@@ -236,10 +240,17 @@ public:
         // Output length, and its error, kept apart from timing error (§8).
         if (r.has_output_tokens && r.output_tokens > 0) {
             const double actual = r.output_tokens;
-            output_len_[key2(r.model, r.role_hint)].add(actual, hl);
-            output_len_[key2(r.model, std::string())].add(actual, hl);
-            if (r.predicted_output_tokens > 0) {
-                const double err = std::fabs(actual - r.predicted_output_tokens);
+            // The residual is measured against what *this* model would have
+            // said, taken before the mean below moves. The record's own
+            // prediction belongs to whichever model wrote the trace — usually
+            // the static one, since that is what runs the warm-up — and
+            // adopting it teaches the learned model somebody else's error as
+            // its own sigma, inflating every band it ever produces (D31).
+            const Ewma* prior = find(output_len_, key2(r.model, r.role_hint));
+            if (!prior || !prior->has(kMinSamples))
+                prior = find(output_len_, key2(r.model, std::string()));
+            if (prior && prior->has(kMinSamples)) {
+                const double err = std::fabs(actual - prior->value);
                 // A perfect prediction gives an error of zero, which Ewma::add
                 // refuses as non-positive — so it is floored at one token. The
                 // alternative is a sigma that collapses to zero and a scheduler
@@ -247,6 +258,8 @@ public:
                 output_err_[key2(r.model, r.role_hint)].add(std::max(1.0, err), hl);
                 output_err_[key2(r.model, std::string())].add(std::max(1.0, err), hl);
             }
+            output_len_[key2(r.model, r.role_hint)].add(actual, hl);
+            output_len_[key2(r.model, std::string())].add(actual, hl);
         }
 
         if (!r.has_ttft) return;  // nothing below can be derived without it

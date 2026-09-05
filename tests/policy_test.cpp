@@ -583,6 +583,42 @@ void test_learned_cost_model() {
     check(informed.sigma > 0,
           "but never zero — a perfect run does not make the next one certain");
 
+    // The estimate has to carry the prediction it used, because that is what
+    // the trace records. Reading the caller's cap instead writes a zero on
+    // every uncapped request, and a zero is indistinguishable from "the model
+    // said nothing" — which makes the length error unmeasurable and leaves the
+    // learned sigma permanently guessed (D30).
+    const rf::Estimate uncapped_est =
+        learned->estimate(uncapped, jetson, ledger, none, rf::now_ms());
+    check(uncapped_est.predicted_output_tokens == informed.tokens,
+          "the estimate reports the output length it actually priced");
+    check(uncapped_est.predicted_output_sigma == informed.sigma,
+          "and the sigma that went with it");
+    const rf::Estimate seed_est =
+        static_model->estimate(uncapped, jetson, ledger, none, rf::now_ms());
+    check(seed_est.predicted_output_tokens == blind.tokens,
+          "and the static model reports its blind prior rather than nothing");
+
+    // Sigma is the model's own residual. A replayed trace was written by
+    // whichever model was running at the time — the warm-up campaign runs the
+    // static one — so reading the record's prediction would make the learned
+    // model adopt that model's error and hand out a band several times too
+    // wide, on data it actually fits well (D31).
+    auto replayed = rf::make_learned_cost_model(scoring);
+    for (int i = 0; i < 30; ++i) {
+        rf::TraceRecord r = make_record("sim-jetson", "planner:12b", true,
+                                        1200, 200, 400, 2000, 1);
+        r.role_hint = "planner";
+        r.predicted_output_tokens = 1000;   // what the *other* model guessed
+        r.predicted_output_sigma = 800.f;
+        replayed->observe(r);
+    }
+    const rf::OutputPrediction inherited = replayed->predict_output(uncapped);
+    check(std::abs(static_cast<int>(inherited.tokens) - 200) < 25,
+          "a trace written by another model still teaches the right length");
+    check(inherited.sigma < 40.f,
+          "and its error is not adopted as our own uncertainty");
+
     // A failed job describes a broken transfer, not a node's speed.
     auto fresh = rf::make_learned_cost_model(scoring);
     for (int i = 0; i < 30; ++i) {

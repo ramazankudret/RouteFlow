@@ -15,7 +15,12 @@
 # §9 asks for both: lower prediction error AND a wall-clock improvement. Either
 # alone is not the criterion.
 #
+# --uncapped runs the same comparison with the caller's max_tokens withheld.
+# That is the case Phase 2's first campaign could not test: with a cap present,
+# both arms return the cap and the learned length model never runs (D29).
+#
 #   bench/phase2.sh --runs 5 --rounds 5 --warmup 8
+#   bench/phase2.sh --uncapped --out bench/results-phase2-uncapped
 
 set -euo pipefail
 
@@ -26,6 +31,7 @@ SUBAGENTS=4
 SEED=7
 BIN="${HOME}/rf-build"
 OUT="bench/results-phase2"
+CAP_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --seed)      SEED="$2"; shift 2 ;;
     --bin)       BIN="$2"; shift 2 ;;
     --out)       OUT="$2"; shift 2 ;;
+    --uncapped)  CAP_ARGS=(--uncapped); shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -96,7 +103,7 @@ run_once() {
 
   python3 "${REPO}/bench/loadgen.py" --router http://127.0.0.1:8970 \
       --rounds "${rounds}" --subagents "${SUBAGENTS}" --seed "${SEED}" \
-      --label "${label}" 2>/dev/null | tee /dev/stderr \
+      "${CAP_ARGS[@]+"${CAP_ARGS[@]}"}" --label "${label}" 2>/dev/null | tee /dev/stderr \
       | grep '^RESULT ' | sed 's/^RESULT //' >> "${OUT}/results.jsonl" || true
 
   kill "${pid}" 2>/dev/null || true

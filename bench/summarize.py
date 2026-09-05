@@ -78,8 +78,9 @@ def speed_only_pick(candidates):
 def aggregate(paths):
     agg = {
         "runs": 0, "walls": [], "ttft": [], "total": [], "cold": [],
-        "timing": [], "decided": defaultdict(int),
+        "timing": [], "length": [], "decided": defaultdict(int),
         "flips": 0, "comparable": 0, "load_spread": [],
+        "covered": 0, "banded": 0,
     }
     for path in paths:
         records = load_records(path)
@@ -99,6 +100,25 @@ def aggregate(paths):
         agg["timing"] += [abs(r["predicted_total_ms"] - r["total_ms"]) / r["total_ms"]
                           for r in ok
                           if r.get("predicted_total_ms") and r.get("total_ms", 0) > 0]
+        # Length error is never folded into timing error (§8): they break for
+        # different reasons and one would mask the other.
+        agg["length"] += [abs(r["predicted_output_tokens"] - r["output_tokens"])
+                          / r["output_tokens"]
+                          for r in ok
+                          if r.get("predicted_output_tokens")
+                          and r.get("output_tokens", 0) > 0]
+        # Does the uncertainty band mean anything? A sigma nobody checks is
+        # decoration, and §6.2 spends it on real decisions — within_noise falls
+        # back to the cheaper node whenever two estimates overlap. If coverage
+        # is far from the ~68% a 1-sigma band claims, that fallback is either
+        # firing on differences that were real or refusing to fire on noise.
+        for r in ok:
+            sigma = r.get("predicted_sigma_ms")
+            if not sigma or not r.get("predicted_total_ms") or not r.get("total_ms"):
+                continue
+            agg["banded"] += 1
+            if abs(r["predicted_total_ms"] - r["total_ms"]) <= sigma:
+                agg["covered"] += 1
 
         for r in ok:
             agg["decided"][r.get("decided_by", "?")] += 1
@@ -192,6 +212,19 @@ def main():
         statistics.median(test["cold"]))
     row("timing error (%)", percentile(base["timing"], 0.5) * 100,
         percentile(test["timing"], 0.5) * 100, 1)
+    if base["length"] or test["length"]:
+        row("length error (%)",
+            percentile(base["length"], 0.5) * 100 if base["length"] else None,
+            percentile(test["length"], 0.5) * 100 if test["length"] else None, 1)
+    if base["banded"] and test["banded"]:
+        # Printed without a better/worse mark on purpose: neither direction is
+        # good. A 1-sigma band should cover about 68%. Far below and the band is
+        # too narrow to justify falling back on ties; far above and it is so
+        # wide that within_noise swallows differences that were real.
+        a = base["covered"] / base["banded"] * 100.0
+        b = test["covered"] / test["banded"] * 100.0
+        print(f"  {'within 1 sigma (%)':<26}{a:>14.0f}{b:>14.0f}"
+              f"      (~68% is honest)")
 
     print("\n  ATTRIBUTION — how much of this is actually warmth?")
     for name, group in ((args.baseline, base), (args.policy, test)):

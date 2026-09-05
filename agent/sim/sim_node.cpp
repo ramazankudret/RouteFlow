@@ -37,14 +37,39 @@ std::string extract_prompt(const Json& body) {
     return text;
 }
 
-uint32_t requested_output_tokens(const Json& body, uint32_t fallback) {
-    // The bench drives output length explicitly so a scenario is reproducible.
+uint32_t requested_output_tokens(const Json& body) {
     for (const char* key : {"max_tokens", "max_completion_tokens", "num_predict"}) {
         const uint32_t v = body[key].as_u32(0);
         if (v > 0) return v;
     }
-    const uint32_t v = body["options"]["num_predict"].as_u32(0);
-    return v > 0 ? v : fallback;
+    return body["options"]["num_predict"].as_u32(0);
+}
+
+// A caller that states no cap gets a reply drawn from the model's own length
+// distribution. That is the ordinary case for agent traffic, and it is the case
+// the router has to *predict* rather than be told (D29).
+//
+// The draw is a hash of (node seed, model, prompt) rather than a step of a
+// shared RNG: sub-agent calls arrive concurrently, so a shared stream would
+// hand out lengths in thread-completion order and the scenario would stop
+// replaying identically (D12). Hashing the request makes the length a property
+// of the request, which is also what it is in reality.
+uint32_t drawn_output_tokens(uint64_t seed, const std::string& model,
+                             const std::string& prompt, uint32_t lo, uint32_t hi) {
+    uint64_t h = 1469598103934665603ULL ^ seed;
+    for (const std::string* part : {&model, &prompt}) {
+        for (unsigned char c : *part) {
+            h ^= c;
+            h *= 1099511628211ULL;
+        }
+    }
+    // splitmix64 finalizer. FNV-1a leaves structure in the low bits and the
+    // modulo below takes exactly those.
+    h += 0x9e3779b97f4a7c15ULL;
+    h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
+    h ^= h >> 31;
+    return lo + static_cast<uint32_t>(h % (static_cast<uint64_t>(hi - lo) + 1));
 }
 
 }  // namespace
@@ -88,9 +113,15 @@ bool SimProfile::from_json(const Json& j, SimProfile& out, std::string* err) {
         p.footprint_bytes = m["footprint_bytes"].as_u64(p.disk_bytes);
         p.prefill_tokens_per_ms = m["prefill_tokens_per_ms"].as_num(1.0);
         p.decode_tokens_per_ms = m["decode_tokens_per_ms"].as_num(0.02);
+        p.output_tokens_min = m["output_tokens_min"].as_u32(0);
+        p.output_tokens_max = m["output_tokens_max"].as_u32(0);
         if (p.footprint_bytes == 0 || p.prefill_tokens_per_ms <= 0 ||
             p.decode_tokens_per_ms <= 0) {
             if (err) *err = "model " + p.name + " has a non-positive rate or footprint";
+            return false;
+        }
+        if (p.output_tokens_max < p.output_tokens_min) {
+            if (err) *err = "model " + p.name + " has output_tokens_max below min";
             return false;
         }
         out.models.push_back(std::move(p));
@@ -302,7 +333,14 @@ bool SimNode::handle(const http::Request& req, http::Responder& res) {
     const bool stream = body.has("stream") ? body["stream"].as_bool() : ollama;
     const std::string prompt = prompt_probe;
     const uint32_t prompt_tokens = estimate_tokens(prompt);
-    const uint32_t output_tokens = requested_output_tokens(body, 128);
+    uint32_t output_tokens = requested_output_tokens(body);
+    if (output_tokens == 0) {
+        output_tokens = mp->output_tokens_max > 0
+                            ? drawn_output_tokens(impl_->profile.seed, model, prompt,
+                                                  mp->output_tokens_min,
+                                                  mp->output_tokens_max)
+                            : 128;
+    }
 
     // --- occupy a slot; beyond engine_slots requests genuinely wait ---------
     {

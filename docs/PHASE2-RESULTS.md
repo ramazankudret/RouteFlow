@@ -64,6 +64,27 @@ This matters for reading the result two ways:
 A workload without `max_tokens` is the obvious next measurement, and it is a
 scenario change rather than a code change.
 
+**It has since been run: `docs/PHASE2-UNCAPPED-RESULTS.md`.** The effect is five
+times larger there (-8.8% wall-clock, 25/25 pairwise; cold starts 16 -> 3), and
+the reason is not accuracy for its own sake -- an output-length prior big enough
+to dominate `T_decode` outranks `T_load`, and a warmth-aware router stops being
+warmth-aware. The measurement also found two defects that a capped workload
+cannot expose, because a cap makes predicted, actual and cap the same number
+(D30, D31). The numbers in the table above are unaffected and still reproduce.
+
+## The 1.7% is this campaign's number, not a constant
+
+Every learned run above replays the same `warmup.jsonl` — one draw, re-measured
+five times (D25). The 1.4-2.3% spread across runs is therefore the stability of
+that draw, not of the method: a different warm-up on the same code gives 5.2%,
+and a three-run re-check on a busier machine gives 6.0% against a static arm
+that also rose, to 11.8%.
+
+The comparison survives because `phase2.sh` interleaves the two arms, so both
+drift together and the ratio is what is being measured. The absolute figure
+should be quoted with its campaign attached. See
+`docs/PHASE2-UNCAPPED-RESULTS.md`.
+
 ## What is still seeded
 
 `footprint_bytes` (D24). A v1 trace records the footprint the router *expected*,

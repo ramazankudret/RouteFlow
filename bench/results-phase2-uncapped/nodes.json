@@ -1,0 +1,5 @@
+{ "nodes": [
+    { "id": "sim-desktop", "endpoint": "127.0.0.1:8981" },
+    { "id": "sim-jetson",  "endpoint": "127.0.0.1:8982" },
+    { "id": "sim-laptop",  "endpoint": "127.0.0.1:8983" }
+] }

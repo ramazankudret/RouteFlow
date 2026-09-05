@@ -17,14 +17,18 @@
       "disk_bytes": 6800000000,
       "footprint_bytes": 7000000000,
       "prefill_tokens_per_ms": 0.45,
-      "decode_tokens_per_ms": 0.014
+      "decode_tokens_per_ms": 0.014,
+      "output_tokens_min": 110,
+      "output_tokens_max": 170
     },
     {
       "name": "worker:3b",
       "disk_bytes": 1900000000,
       "footprint_bytes": 2000000000,
       "prefill_tokens_per_ms": 1.4,
-      "decode_tokens_per_ms": 0.042
+      "decode_tokens_per_ms": 0.042,
+      "output_tokens_min": 40,
+      "output_tokens_max": 90
     }
   ],
   "resident_at_start": [

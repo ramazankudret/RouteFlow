@@ -306,11 +306,17 @@ void Dispatcher::handle(const http::Request& client_req, http::Responder& res) {
         rec.has_output_tokens = a.has_output_tokens;
         rec.output_tokens = a.output_tokens;
 
+        // The caller's cap only if the model produced nothing of its own; a
+        // capped request predicts the cap, so this changes no capped result.
         rec.predicted_output_tokens = in.features.predicted_output_tokens;
         rec.predicted_output_sigma = in.features.predicted_output_sigma;
         if (const Candidate* w = r.decision.winner()) {
             rec.predicted_total_ms = w->est.total_ms();
             rec.predicted_sigma_ms = w->est.sigma_ms;
+            if (w->est.predicted_output_tokens > 0) {
+                rec.predicted_output_tokens = w->est.predicted_output_tokens;
+                rec.predicted_output_sigma = w->est.predicted_output_sigma;
+            }
         }
 
         // Router-side overhead only. Engine-side queueing is not observable and

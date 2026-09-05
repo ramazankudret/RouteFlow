@@ -107,6 +107,14 @@ struct Estimate {
     uint32_t samples = 0;
     uint32_t omitted_terms = 0;
 
+    // What the model expected the reply to be. Carried here so the trace can
+    // record the *prediction* rather than the caller's cap: uncapped, the cap
+    // is zero, and a record saying the router predicted nothing leaves the
+    // length error unmeasurable and the learned model unable to learn its own
+    // sigma — in exactly the case where the prediction is what matters (D30).
+    uint32_t predicted_output_tokens = 0;
+    float predicted_output_sigma = 0.f;
+
     double total_ms() const {
         return t_queue_ms + t_load_ms + t_prefill_ms + t_decode_ms + t_evict_ms;
     }

@@ -471,10 +471,10 @@ a:hover{color:#6ff0a4}
         </div>
         <div class="p-legend"><span><i class="plk" style="background:var(--t-queue)"></i>warm start</span><span><i class="plk" style="background:var(--t-load)"></i>cold start</span><span><i class="pll"></i>1:1 reference</span><span style="margin-left:auto">x predicted &middot; y measured</span></div>
         <div class="stats">
-          <div class="stat is-head"><span class="s-l">all traces</span><span class="s-v">median |err| 9.4%</span><span class="s-n">p90 28.1% &middot; bias +6.2%, the scheduler runs optimistic</span></div>
-          <div class="stat"><span class="s-l">warm &middot; n 14</span><span class="s-v">median 4.1%</span><span class="s-n">p90 8.8% &middot; tight, no systematic direction</span></div>
-          <div class="stat"><span class="s-l">cold &middot; n 12</span><span class="s-v">median 16.8%</span><span class="s-n">p90 31.5% &middot; 9 of 12 ran longer than predicted</span></div>
-          <div class="stat"><span class="s-l">worst case</span><span class="s-v">+25.4%</span><span class="s-n">j-7f2ea4 &middot; predicted 5.60 s &middot; actual 7.02 s</span></div>
+          <div class="stat is-head"><span class="s-l">all traces</span><span class="s-v" data-rf="timing_all_value">median |err| 9.4%</span><span class="s-n" data-rf="timing_all_note">p90 28.1% &middot; bias +6.2%, the scheduler runs optimistic</span></div>
+          <div class="stat"><span class="s-l" data-rf="timing_warm_label">warm &middot; n 14</span><span class="s-v" data-rf="timing_warm_value">median 4.1%</span><span class="s-n" data-rf="timing_warm_note">p90 8.8% &middot; tight, no systematic direction</span></div>
+          <div class="stat"><span class="s-l" data-rf="timing_cold_label">cold &middot; n 12</span><span class="s-v" data-rf="timing_cold_value">median 16.8%</span><span class="s-n" data-rf="timing_cold_note">p90 31.5% &middot; 9 of 12 ran longer than predicted</span></div>
+          <div class="stat"><span class="s-l">worst case</span><span class="s-v" data-rf="timing_worst_value">+25.4%</span><span class="s-n" data-rf="timing_worst_note">j-7f2ea4 &middot; predicted 5.60 s &middot; actual 7.02 s</span></div>
         </div>
       </section>
       <section data-rf-item="accuracy_tokens">
@@ -538,10 +538,10 @@ a:hover{color:#6ff0a4}
         </div>
         <div class="p-legend"><span><i class="plk" style="background:#8d9aa3"></i>completed generation</span><span><i class="pll"></i>1:1 reference</span><span style="margin-left:auto">tokens, not milliseconds</span></div>
         <div class="stats">
-          <div class="stat is-head"><span class="s-l">all traces</span><span class="s-v">median |err| 8.9%</span><span class="s-n">p90 61.7% &middot; a long tail, not a shift</span></div>
-          <div class="stat"><span class="s-l">over-runs</span><span class="s-v">11 of 26</span><span class="s-n">generated more than predicted</span></div>
-          <div class="stat"><span class="s-l">early stops</span><span class="s-v">2 of 26</span><span class="s-n">stop sequence hit well before the estimate</span></div>
-          <div class="stat"><span class="s-l">worst case</span><span class="s-v">+267%</span><span class="s-n">j-7e90c1 &middot; predicted 240 tok &middot; actual 880 tok</span></div>
+          <div class="stat is-head"><span class="s-l">all traces</span><span class="s-v" data-rf="length_all_value">median |err| 8.9%</span><span class="s-n" data-rf="length_all_note">p90 61.7% &middot; a long tail, not a shift</span></div>
+          <div class="stat"><span class="s-l">over-runs</span><span class="s-v" data-rf="length_over_value">11 of 26</span><span class="s-n" data-rf="length_over_note">generated more than predicted</span></div>
+          <div class="stat"><span class="s-l">early stops</span><span class="s-v" data-rf="length_early_value">2 of 26</span><span class="s-n" data-rf="length_early_note">stop sequence hit well before the estimate</span></div>
+          <div class="stat"><span class="s-l">worst case</span><span class="s-v" data-rf="length_worst_value">+267%</span><span class="s-n" data-rf="length_worst_note">j-7e90c1 &middot; predicted 240 tok &middot; actual 880 tok</span></div>
         </div>
       </section>
       <section class="span2" data-rf-item="accuracy_error_dist">

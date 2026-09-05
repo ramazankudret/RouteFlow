@@ -660,13 +660,44 @@
   // load and page cache, length error with a few runaway generations. Folding
   // them into one number would hide both, so each panel gets its own axis and
   // its own points.
+  // A round ceiling above the data. Scaling an axis to the largest point exactly
+  // puts that point on the border where it is half clipped, and labels the axis
+  // with a number nobody chose.
+  function niceMax(value) {
+    if (!(value > 0)) return 1;
+    var mag = Math.pow(10, Math.floor(Math.log(value) / Math.LN10));
+    var steps = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i] * mag >= value) return steps[i] * mag;
+    }
+    return 10 * mag;
+  }
+
+  // The axis ticks are drawn as fixture values - 0 to 16 s, 0 to 1200 tokens.
+  // Live data has its own range, so leaving them as drawn would put a 150-token
+  // reply at "40% of 1200" and the plot would be wrong in the one way a plot
+  // must never be. Each tick already carries its own position, so its label is
+  // just that fraction of the new ceiling.
+  function rescaleAxis(ticks, max, fmt) {
+    for (var i = 0; i < ticks.length; i++) {
+      var css = ticks[i].style.bottom || ticks[i].style.left;
+      var frac = parseFloat(css) / 100;
+      if (isFinite(frac)) ticks[i].textContent = fmt(max * frac);
+    }
+  }
+
   function fillScatter(section, points, label) {
     if (!section) return;
-    var plot = section.querySelector('.plot');
-    if (!plot) return;
+    // Dots are positioned against .plot-area. `.plot` is a two-column grid with
+    // no positioning of its own, so appending there placed every point against
+    // an ancestor further up and off the axes entirely - bound, and invisible.
+    var area = section.querySelector('.plot-area');
+    if (!area) return;
 
-    var old = plot.querySelectorAll('[data-rf-item="trace"]');
+    var old = area.querySelectorAll('[data-rf-item="trace"]');
     for (var i = 0; i < old.length; i++) old[i].remove();
+    var stale = area.querySelector('.plabel');
+    if (stale) stale.remove();
 
     var n = section.querySelector('.pan-h .n');
     if (n) n.textContent = 'n ' + points.length;
@@ -676,7 +707,11 @@
     // point above it ran longer than predicted, which is the whole reading.
     var max = 1;
     points.forEach(function (p) { max = Math.max(max, p.x, p.y); });
+    max = niceMax(max);
+    rescaleAxis(section.querySelectorAll('.plot-y span'), max, label.axis);
+    rescaleAxis(section.querySelectorAll('.plot-x span'), max, label.axis);
 
+    var worst = null;
     points.forEach(function (p) {
       var dot = clone('rf-tpl-scatter-point');
       if (!dot) return;
@@ -684,10 +719,39 @@
       dot.style.bottom = (p.y / max * 100).toFixed(2) + '%';
       dot.classList.toggle('is-warm', !!p.warm);
       dot.classList.toggle('is-cold', !p.warm);
+      // The template carries the timing panel's two field names. On the length
+      // panel they are different fields, so the hooks are renamed rather than
+      // left pointing at quantities this dot does not hold.
+      var slots = dot.querySelectorAll('[data-rf]');
+      if (slots.length >= 2) {
+        slots[0].setAttribute('data-rf', label.x);
+        slots[1].setAttribute('data-rf', label.y);
+      }
       setHook(dot, label.x, label.fmt(p.x));
       setHook(dot, label.y, label.fmt(p.y));
-      plot.appendChild(dot);
+      dot.title = shortId(p.id) + ' \u00b7 predicted ' + label.fmt(p.x) +
+                  ' \u00b7 measured ' + label.fmt(p.y);
+      area.appendChild(dot);
+      if (!worst || relErr(p) > relErr(worst)) worst = p;
     });
+
+    // The design annotates the worst outlier by name. It was drawn against a
+    // fixture job; pointing it at the real one is what makes it true.
+    if (worst && relErr(worst) > 0.1) {
+      var note = document.createElement('span');
+      note.className = 'plabel';
+      note.style.left = (worst.x / max * 100).toFixed(2) + '%';
+      note.style.bottom = (worst.y / max * 100).toFixed(2) + '%';
+      note.textContent = shortId(worst.id) + ' \u00b7 ' + label.note(worst);
+      area.appendChild(note);
+    }
+  }
+
+  function relErr(p) { return p.y > 0 ? Math.abs(p.x - p.y) / p.y : 0; }
+
+  function signedPct(p) {
+    var d = (p.y - p.x) / p.x;
+    return (d >= 0 ? '+' : '') + (d * 100).toFixed(0) + '%';
   }
 
   function renderAccuracy(jobs) {
@@ -696,12 +760,14 @@
     var timing = ok.filter(function (j) {
       return j.predicted_total_ms && j.total_ms;
     }).map(function (j) {
-      return { x: j.predicted_total_ms, y: j.total_ms, warm: !!j.was_resident };
+      return { id: j.job_id, x: j.predicted_total_ms, y: j.total_ms,
+               warm: !!j.was_resident };
     });
     var length = ok.filter(function (j) {
       return j.predicted_output_tokens && j.output_tokens;
     }).map(function (j) {
-      return { x: j.predicted_output_tokens, y: j.output_tokens, warm: !!j.was_resident };
+      return { id: j.job_id, x: j.predicted_output_tokens, y: j.output_tokens,
+               warm: !!j.was_resident };
     });
 
     if (!timing.length && !length.length) {
@@ -710,20 +776,131 @@
       return;
     }
 
+    var tokens = function (v) { return Math.round(v) + ' tok'; };
     fillScatter(document.querySelector('[data-rf-item="accuracy_total"]'), timing,
-      { x: 'predicted_total_ms', y: 'total_ms', fmt: ms });
+      { x: 'predicted_total_ms', y: 'total_ms', fmt: ms, axis: ms,
+        note: function (p) {
+          return (p.warm ? 'warm' : 'cold') + ' \u00b7 ' + signedPct(p);
+        } });
     fillScatter(document.querySelector('[data-rf-item="accuracy_tokens"]'), length,
-      { x: 'predicted_output_tokens', y: 'output_tokens',
-        fmt: function (v) { return Math.round(v) + ' tok'; } });
+      { x: 'predicted_output_tokens', y: 'output_tokens', fmt: tokens,
+        axis: function (v) { return Math.round(v) + ''; },
+        note: function (p) {
+          return Math.round(p.x) + ' \u2192 ' + Math.round(p.y) + ' tok';
+        } });
 
-    var err = function (p) { return Math.abs(p.x - p.y) / p.y; };
-    var warm = timing.filter(function (p) { return p.warm; });
-    var cold = timing.filter(function (p) { return !p.warm; });
-    setHook(document, 'warm_count', warm.length);
-    setHook(document, 'cold_count', cold.length);
-    setHook(document, 'warm_median', warm.length ? pct(median(warm.map(err))) : null);
-    setHook(document, 'cold_median', cold.length ? pct(median(cold.map(err))) : null);
-    setHook(document, 'median_err', timing.length ? pct(median(timing.map(err))) : null);
+    fillTimingStats(timing);
+    fillLengthStats(length);
+  }
+
+  function relPct(values, q) {
+    var v = percentileOf(values, q);
+    return v === null ? DASH : pct(v);
+  }
+
+  function percentileOf(values, q) {
+    if (!values.length) return null;
+    var s = values.slice().sort(function (a, b) { return a - b; });
+    var pos = (s.length - 1) * q;
+    var lo = Math.floor(pos), hi = Math.ceil(pos);
+    return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
+  }
+
+  // Signed, so a bias has a direction: positive means the job ran longer than
+  // promised. |err| alone cannot tell a scatter from a shift, and the design's
+  // note line asks which one it is.
+  function signedErr(p) { return (p.y - p.x) / p.x; }
+  function absErr(p) { return p.y > 0 ? Math.abs(p.x - p.y) / p.y : 0; }
+
+  function worstOf(points) {
+    var worst = null;
+    points.forEach(function (p) {
+      if (!worst || absErr(p) > absErr(worst)) worst = p;
+    });
+    return worst;
+  }
+
+  // The stats block under each scatter. It was drawn with fixture numbers and
+  // no hooks at all, so it sat under live points asserting measurements of a
+  // run that never happened — the quietest way for a console to mislead. Every
+  // line here is computed from the same points the scatter plots.
+  function fillTimingStats(points) {
+    var section = document.querySelector('[data-rf-item="accuracy_total"]');
+    if (!section) return;
+    var warm = points.filter(function (p) { return p.warm; });
+    var cold = points.filter(function (p) { return !p.warm; });
+
+    setHook(section, 'timing_all_value',
+      points.length ? 'median |err| ' + relPct(points.map(absErr), 0.5) : DASH);
+    if (points.length) {
+      var bias = percentileOf(points.map(signedErr), 0.5);
+      setHook(section, 'timing_all_note',
+        'p90 ' + relPct(points.map(absErr), 0.9) + ' \u00b7 bias ' +
+        (bias >= 0 ? '+' : '') + (bias * 100).toFixed(1) + '%, ' +
+        (Math.abs(bias) < 0.02 ? 'no systematic direction'
+          : bias > 0 ? 'the scheduler runs optimistic'
+                     : 'the scheduler runs pessimistic'));
+    } else {
+      setHook(section, 'timing_all_note', null);
+    }
+
+    [['warm', warm], ['cold', cold]].forEach(function (pair) {
+      var name = pair[0], group = pair[1];
+      setHook(section, 'timing_' + name + '_label', name + ' \u00b7 n ' + group.length);
+      setHook(section, 'timing_' + name + '_value',
+        group.length ? 'median ' + relPct(group.map(absErr), 0.5) : DASH);
+      if (!group.length) {
+        setHook(section, 'timing_' + name + '_note', 'no ' + name + ' jobs in this window');
+        return;
+      }
+      var over = group.filter(function (p) { return p.y > p.x; }).length;
+      setHook(section, 'timing_' + name + '_note',
+        'p90 ' + relPct(group.map(absErr), 0.9) + ' \u00b7 ' + over + ' of ' +
+        group.length + ' ran longer than predicted');
+    });
+
+    var worst = worstOf(points);
+    setHook(section, 'timing_worst_value',
+      worst ? (worst.y >= worst.x ? '+' : '') +
+              (signedErr(worst) * 100).toFixed(1) + '%' : DASH);
+    setHook(section, 'timing_worst_note',
+      worst ? shortId(worst.id) + ' \u00b7 predicted ' + ms(worst.x) +
+              ' \u00b7 actual ' + ms(worst.y) : DASH);
+  }
+
+  function fillLengthStats(points) {
+    var section = document.querySelector('[data-rf-item="accuracy_tokens"]');
+    if (!section) return;
+    var tok = function (v) { return Math.round(v) + ' tok'; };
+
+    setHook(section, 'length_all_value',
+      points.length ? 'median |err| ' + relPct(points.map(absErr), 0.5) : DASH);
+    setHook(section, 'length_all_note', points.length
+      ? 'p90 ' + relPct(points.map(absErr), 0.9) + ' \u00b7 ' +
+        (percentileOf(points.map(signedErr), 0.5) > 0.02
+          ? 'replies run past the estimate'
+          : percentileOf(points.map(signedErr), 0.5) < -0.02
+            ? 'replies stop short of the estimate'
+            : 'a spread, not a shift')
+      : null);
+
+    // "Over-run" and "early stop" are the design's words for the two ways a
+    // length prediction fails, and they are not symmetric: one wastes VRAM
+    // time, the other wastes the reservation.
+    var over = points.filter(function (p) { return p.y > p.x; }).length;
+    var early = points.filter(function (p) { return p.y < p.x; }).length;
+    setHook(section, 'length_over_value', over + ' of ' + points.length);
+    setHook(section, 'length_over_note', 'generated more than predicted');
+    setHook(section, 'length_early_value', early + ' of ' + points.length);
+    setHook(section, 'length_early_note', 'finished below the estimate');
+
+    var worst = worstOf(points);
+    setHook(section, 'length_worst_value',
+      worst ? (worst.y >= worst.x ? '+' : '') +
+              (signedErr(worst) * 100).toFixed(0) + '%' : DASH);
+    setHook(section, 'length_worst_note',
+      worst ? shortId(worst.id) + ' \u00b7 predicted ' + tok(worst.x) +
+              ' \u00b7 actual ' + tok(worst.y) : DASH);
   }
 
   // --- wiring ---------------------------------------------------------------
