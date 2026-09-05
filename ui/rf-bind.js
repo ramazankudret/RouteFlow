@@ -770,11 +770,15 @@
                warm: !!j.was_resident };
     });
 
-    if (!timing.length && !length.length) {
-      var section = document.querySelector('[data-rf-item="accuracy_total"] .plot');
-      if (section) showEmpty(section, 'rf-tpl-empty-traces');
-      return;
-    }
+    // No early return on an empty window. Returning here used to leave every
+    // other panel on this screen showing the numbers it was drawn with, so a
+    // scheduler that had run nothing at all reported a full set of
+    // measurements — a median error, a worst case, five named nodes. Each fill
+    // below states its own emptiness instead.
+    emptyCard(document.querySelector('[data-rf-item="accuracy_total"] .plot-area'),
+              !timing.length);
+    emptyCard(document.querySelector('[data-rf-item="accuracy_tokens"] .plot-area'),
+              !length.length);
 
     var tokens = function (v) { return Math.round(v) + ' tok'; };
     fillScatter(document.querySelector('[data-rf-item="accuracy_total"]'), timing,
@@ -791,6 +795,436 @@
 
     fillTimingStats(timing);
     fillLengthStats(length);
+    fillErrorSpread(timing);
+    fillErrorByNode(ok);
+    fillDrift(ok);
+  }
+
+  // --- signed error spread ---------------------------------------------------
+
+  var BUCKETS = 7;
+  var HIST_PX = 190;   // .hist is 190px tall and aligns its bars to the bottom
+
+  // Bucket edges come from the data, but zero is always one of them. The panel
+  // reads "left of zero the job finished early", so a bucket straddling zero
+  // would put early and late jobs in the same bar and the whole panel would
+  // stop meaning what it says. Every edge is a multiple of the width, so zero
+  // is an edge for free.
+  function bucketWidth(min, max) {
+    var steps = [0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10];
+    for (var i = 0; i < steps.length; i++) {
+      if (Math.floor(min / steps[i]) * steps[i] + BUCKETS * steps[i] >= max) {
+        return steps[i];
+      }
+    }
+    return steps[steps.length - 1];
+  }
+
+  function signedPctLabel(v) {
+    // Rounded first, so a boundary that floating-point arithmetic left at
+    // -1e-15 prints as 0% and not as -0%.
+    var n = Math.round(v * 100);
+    if (n === 0) return '0%';
+    return (n > 0 ? '+' : '') + n + '%';
+  }
+
+  function fillErrorSpread(points) {
+    var section = document.querySelector('[data-rf-item="accuracy_error_dist"]');
+    if (!section) return;
+    var hist = section.querySelector('.hist');
+    var axis = section.querySelector('.hx');
+    if (!hist || !axis) return;
+    clear(hist);
+    clear(axis);
+
+    setHook(section, 'dist_count', points.length);
+    setHook(section, 'dist_n', 'n ' + points.length +
+      (points.length ? '' : ' \u00b7 nothing to bucket'));
+    if (!points.length) {
+      setHook(section, 'dist_warm', 'warm \u00b7 0');
+      setHook(section, 'dist_cold', 'cold \u00b7 0');
+      setHook(section, 'dist_summary', 'no finished jobs in this window');
+      return;
+    }
+
+    var signed = points.map(signedErr);
+    // Width comes from the middle of the distribution, not its extremes. One
+    // job that ran three times its estimate would otherwise set a bucket width
+    // wide enough to put every other job in two bars, and the panel exists to
+    // show shape. Anything outside the range is clamped into the end buckets,
+    // and those buckets say so rather than claiming a range they do not hold.
+    var min = percentileOf(signed, 0.05);
+    var max = percentileOf(signed, 0.95);
+    var w = bucketWidth(min, max);
+    var lo = Math.floor(min / w) * w;
+    var under = 0, over = 0;
+
+    var cells = [];
+    for (var i = 0; i < BUCKETS; i++) cells.push({ warm: 0, cold: 0 });
+    points.forEach(function (p) {
+      var index = Math.floor((signedErr(p) - lo) / w);
+      if (index < 0) { index = 0; under++; }
+      if (index >= BUCKETS) { index = BUCKETS - 1; over++; }
+      cells[index][p.warm ? 'warm' : 'cold']++;
+    });
+
+    var tallest = 1;
+    cells.forEach(function (c) { tallest = Math.max(tallest, c.warm + c.cold); });
+
+    cells.forEach(function (cell, index) {
+      var col = clone('rf-tpl-bucket');
+      var label = clone('rf-tpl-bucket-label');
+      if (!col || !label) return;
+      var total = cell.warm + cell.cold;
+      setHook(col, 'count', total ? total : '');
+      // Selected by class, not by hook name: these two bars are geometry, and
+      // the same hook names carry text elsewhere on the page.
+      var cold = col.querySelector('.h-cold');
+      var warm = col.querySelector('.h-warm');
+      cold.style.height = (cell.cold / tallest * HIST_PX).toFixed(1) + 'px';
+      warm.style.height = (cell.warm / tallest * HIST_PX).toFixed(1) + 'px';
+      cold.classList.toggle('h-zero', cell.cold === 0);
+      warm.classList.toggle('h-zero', cell.warm === 0);
+      hist.appendChild(col);
+
+      // setHook searches *inside* a root; the label element is the hook
+      // itself, so writing through it left all seven reading the fixture.
+      var from = lo + index * w, to = from + w;
+      label.textContent =
+        index === 0 && under ? '\u2264 ' + signedPctLabel(to)
+        : index === BUCKETS - 1 && over ? '\u2265 ' + signedPctLabel(from)
+        : signedPctLabel(from) + ' \u2026 ' + signedPctLabel(to);
+      axis.appendChild(label);
+    });
+
+    var warmN = points.filter(function (p) { return p.warm; }).length;
+    var early = points.filter(function (p) { return p.y < p.x; }).length;
+    setHook(section, 'dist_warm', 'warm \u00b7 ' + warmN);
+    setHook(section, 'dist_cold', 'cold \u00b7 ' + (points.length - warmN));
+    setHook(section, 'dist_summary',
+      'median ' + signedPctLabel(percentileOf(signed, 0.5)) +
+      ' \u00b7 p90 ' + signedPctLabel(percentileOf(signed, 0.9)) +
+      ' \u00b7 ' + early + ' of ' + points.length + ' finished early');
+  }
+
+  // --- error by node ---------------------------------------------------------
+
+  function fillErrorByNode(jobs) {
+    var section = document.querySelector('[data-rf-item="accuracy_by_node"]');
+    if (!section) return;
+    var list = section.querySelector('.dumb');
+    if (!list) return;
+    clear(list);
+
+    var byNode = {};
+    state.nodes.forEach(function (n) {
+      byNode[n.id] = { node: n, warm: [], cold: [] };
+    });
+    jobs.forEach(function (j) {
+      if (!j.node_id || !j.predicted_total_ms || !j.total_ms) return;
+      var row = byNode[j.node_id];
+      // A trace can name a node the registry no longer lists; it is still a
+      // measurement and dropping it would quietly shrink the sample.
+      if (!row) row = byNode[j.node_id] = { node: { id: j.node_id }, warm: [], cold: [] };
+      row[j.was_resident ? 'warm' : 'cold'].push(
+        Math.abs(j.predicted_total_ms - j.total_ms) / j.total_ms);
+    });
+
+    var ids = Object.keys(byNode).sort();
+    // A floor on the axis so a well-calibrated cluster is not magnified into
+    // looking erratic; above that the axis follows the data.
+    var top = 0.1;
+    ids.forEach(function (id) {
+      var r = byNode[id];
+      if (r.warm.length) top = Math.max(top, median(r.warm));
+      if (r.cold.length) top = Math.max(top, median(r.cold));
+    });
+    top = niceMax(top);
+
+    var axisLabels = section.querySelectorAll('[data-rf="node_axis"]');
+    for (var a = 0; a < axisLabels.length; a++) {
+      var frac = axisLabels.length > 1 ? a / (axisLabels.length - 1) : 0;
+      axisLabels[a].textContent = a === 0 ? '0' : pct(top * frac, 0);
+    }
+
+    ids.forEach(function (id) {
+      var r = byNode[id];
+      var row = clone('rf-tpl-node-error');
+      if (!row) return;
+      setHook(row, 'node_id', id);
+
+      var warmErr = r.warm.length ? median(r.warm) : null;
+      var coldErr = r.cold.length ? median(r.cold) : null;
+      var warmDot = row.querySelector('.dpt.is-warm');
+      var coldDot = row.querySelector('.dpt.is-cold');
+      var link = row.querySelector('.dlink');
+
+      if (warmErr === null) {
+        warmDot.classList.add('is-none');
+        warmDot.classList.remove('is-warm');
+        warmDot.hidden = true;
+      } else {
+        warmDot.style.left = Math.min(100, warmErr / top * 100).toFixed(2) + '%';
+      }
+      if (coldErr === null) {
+        coldDot.classList.add('is-none');
+        coldDot.classList.remove('is-cold');
+        coldDot.hidden = true;
+      } else {
+        coldDot.style.left = Math.min(100, coldErr / top * 100).toFixed(2) + '%';
+      }
+      if (warmErr !== null && coldErr !== null) {
+        var a1 = Math.min(warmErr, coldErr) / top * 100;
+        var a2 = Math.max(warmErr, coldErr) / top * 100;
+        link.style.left = a1.toFixed(2) + '%';
+        link.style.width = Math.max(0, a2 - a1).toFixed(2) + '%';
+      } else {
+        link.hidden = true;
+      }
+
+      setPart(row, 'warm_part', warmErr !== null);
+      setPart(row, 'cold_part', coldErr !== null);
+      setPart(row, 'no_data', warmErr === null && coldErr === null);
+      if (warmErr !== null) {
+        setHook(row, 'warm_err', pct(warmErr));
+        setHook(row, 'warm_n', r.warm.length);
+      }
+      if (coldErr !== null) {
+        setHook(row, 'cold_err', pct(coldErr));
+        setHook(row, 'cold_n', r.cold.length);
+      }
+
+      var note = row.querySelector('[data-rf="node_note"]');
+      var text = null;
+      if (warmErr === null && coldErr === null) {
+        text = 'no traces in this window';
+      } else if (warmErr === null) {
+        text = r.node && r.node.residency_known === false
+          ? 'no warm traces \u2014 this engine never reports residency, so every '
+            + 'job here is scored cold'
+          : 'no warm traces in this window';
+      }
+      if (note) {
+        note.textContent = text || '';
+        note.hidden = !text;
+      }
+      list.appendChild(row);
+    });
+  }
+
+  function setPart(root, name, on) {
+    var el = root.querySelector('[data-rf-item="' + name + '"]');
+    if (el) el.hidden = !on;
+  }
+
+  // --- calibration drift -----------------------------------------------------
+
+  // A rolling median needs enough jobs per step to be a median at all. With a
+  // short window the honest move is fewer steps, not a smoother-looking line
+  // drawn through ones and twos.
+  function driftSteps(count) {
+    return Math.max(3, Math.min(12, Math.floor(count / 4)));
+  }
+
+  function fillDrift(jobs) {
+    var section = document.querySelector('[data-rf-item="accuracy_drift"]');
+    if (!section) return;
+    var warmPath = section.querySelector('[data-rf="warm_series"]');
+    var coldPath = section.querySelector('[data-rf="cold_series"]');
+    var bandPath = section.querySelector('[data-rf="cold_band"]');
+    if (!warmPath || !coldPath || !bandPath) return;
+
+    var usable = jobs.filter(function (j) {
+      return j.ts_done && j.predicted_total_ms && j.total_ms > 0;
+    }).map(function (j) {
+      return {
+        t: new Date(j.ts_done).getTime(),
+        err: Math.abs(j.predicted_total_ms - j.total_ms) / j.total_ms,
+        warm: !!j.was_resident
+      };
+    }).filter(function (j) { return !isNaN(j.t); })
+      .sort(function (a, b) { return a.t - b.t; });
+
+    var blank = function (message) {
+      warmPath.setAttribute('d', '');
+      coldPath.setAttribute('d', '');
+      bandPath.setAttribute('d', '');
+      setPart(section, 'drift_event', false);
+      setHook(section, 'drift_note', message);
+      setHook(section, 'drift_summary', DASH);
+      var ticks = section.querySelectorAll('[data-rf="drift_time"]');
+      for (var i = 0; i < ticks.length; i++) ticks[i].textContent = DASH;
+    };
+
+    setHook(section, 'drift_steps', usable.length
+      ? 'rolling median · ' + driftSteps(usable.length) + ' steps over ' +
+        Math.max(1, Math.round((usable[usable.length - 1].t - usable[0].t) / 60000)) + ' min'
+      : 'rolling median');
+
+    if (usable.length < 8) {
+      blank('Not enough finished jobs yet to draw a rolling median. ' +
+            'The window needs at least eight; it has ' + usable.length + '.');
+      return;
+    }
+
+    var first = usable[0].t, last = usable[usable.length - 1].t;
+    var span = Math.max(1, last - first);
+    var steps = driftSteps(usable.length);
+    var cells = [];
+    for (var i = 0; i < steps; i++) cells.push({ warm: [], cold: [], t: first + span * (i + 0.5) / steps });
+    usable.forEach(function (j) {
+      var index = Math.min(steps - 1, Math.floor((j.t - first) / span * steps));
+      cells[index][j.warm ? 'warm' : 'cold'].push(j.err);
+    });
+
+    var top = 0.05;
+    cells.forEach(function (c) {
+      if (c.warm.length) top = Math.max(top, median(c.warm));
+      if (c.cold.length) top = Math.max(top, median(c.cold) + spread(c.cold));
+    });
+    top = niceMax(top);
+
+    var axis = section.querySelectorAll('[data-rf="drift_axis"]');
+    for (var a = 0; a < axis.length; a++) {
+      var frac = parseFloat(axis[a].style.bottom) / 100;
+      if (isFinite(frac)) axis[a].textContent = pct(top * frac, 0);
+    }
+
+    // viewBox is 0 0 100 100 with y running downward, so a larger error sits
+    // closer to the top of the box and therefore at a smaller y.
+    var x = function (i) { return steps > 1 ? i / (steps - 1) * 100 : 50; };
+    var y = function (v) { return Math.max(0, Math.min(100, 100 - v / top * 100)); };
+
+    warmPath.setAttribute('d', series(cells, 'warm', x, y));
+    coldPath.setAttribute('d', series(cells, 'cold', x, y));
+    bandPath.setAttribute('d', band(cells, x, y));
+
+    var ticks = section.querySelectorAll('[data-rf="drift_time"]');
+    for (var k = 0; k < ticks.length; k++) {
+      var f = ticks.length > 1 ? k / (ticks.length - 1) : 0;
+      ticks[k].textContent = clockTime(new Date(first + span * f).toISOString());
+    }
+
+    // The design marks an event on the timeline. Rather than name a cause we
+    // cannot see, it marks the step that actually paid for the most cold
+    // starts, and only when one step stands out.
+    var busiest = -1, busiestCount = 1;
+    cells.forEach(function (c, index) {
+      if (c.cold.length > busiestCount) { busiest = index; busiestCount = c.cold.length; }
+    });
+    var event = section.querySelector('[data-rf-item="drift_event"]');
+    if (event) {
+      if (busiest >= 0) {
+        event.hidden = false;
+        event.style.left = x(busiest).toFixed(1) + '%';
+        setHook(event, 'drift_event_label', busiestCount + ' cold starts \u00b7 ' +
+          clockTime(new Date(cells[busiest].t).toISOString()));
+      } else {
+        event.hidden = true;
+      }
+    }
+
+    var firstCold = firstWith(cells, 'cold'), lastCold = lastWith(cells, 'cold');
+    var warmAll = [], coldAll = [];
+    cells.forEach(function (c) {
+      warmAll = warmAll.concat(c.warm);
+      coldAll = coldAll.concat(c.cold);
+    });
+    setHook(section, 'drift_note', describeDrift(warmAll, coldAll, firstCold, lastCold));
+    setHook(section, 'drift_summary', coldAll.length && warmAll.length
+      ? 'cold error runs ' + (median(coldAll) / Math.max(1e-9, median(warmAll))).toFixed(1) +
+        '\u00d7 warm across the window'
+      : 'not enough of both kinds to compare');
+  }
+
+  function spread(values) {
+    if (values.length < 2) return 0;
+    var m = values.reduce(function (a, b) { return a + b; }, 0) / values.length;
+    var v = values.reduce(function (a, b) { return a + (b - m) * (b - m); }, 0) /
+            (values.length - 1);
+    return Math.sqrt(v);
+  }
+
+  function series(cells, key, x, y) {
+    var parts = [];
+    cells.forEach(function (c, i) {
+      if (!c[key].length) return;   // a step with no jobs is a gap, not a zero
+      parts.push((parts.length ? 'L' : 'M') + ' ' + x(i).toFixed(2) + ' ' +
+                 y(median(c[key])).toFixed(2));
+    });
+    return parts.length > 1 ? parts.join(' ') : '';
+  }
+
+  function band(cells, x, y) {
+    var upper = [], lower = [];
+    cells.forEach(function (c, i) {
+      if (c.cold.length < 2) return;
+      var m = median(c.cold), sd = spread(c.cold);
+      upper.push(x(i).toFixed(2) + ' ' + y(m + sd).toFixed(2));
+      lower.unshift(x(i).toFixed(2) + ' ' + y(Math.max(0, m - sd)).toFixed(2));
+    });
+    if (upper.length < 2) return '';
+    return 'M ' + upper.join(' L ') + ' L ' + lower.join(' L ') + ' Z';
+  }
+
+  function firstWith(cells, key) {
+    for (var i = 0; i < cells.length; i++)
+      if (cells[i][key].length) return median(cells[i][key]);
+    return null;
+  }
+
+  function lastWith(cells, key) {
+    for (var i = cells.length - 1; i >= 0; i--)
+      if (cells[i][key].length) return median(cells[i][key]);
+    return null;
+  }
+
+  function describeDrift(warmAll, coldAll, firstCold, lastCold) {
+    if (!warmAll.length && !coldAll.length) return 'No finished jobs in this window.';
+    var parts = [];
+    if (warmAll.length) {
+      parts.push('Warm error sits near ' + pct(median(warmAll)) + ' across ' +
+                 warmAll.length + ' job(s).');
+    } else {
+      parts.push('No warm jobs in this window.');
+    }
+    if (!coldAll.length) {
+      parts.push('No cold starts, so there is no load cost to track.');
+    } else if (firstCold === null || lastCold === null || firstCold === lastCold) {
+      // Too few cold starts to land in two different steps: the pooled median
+      // is still worth stating, but there is no trend and no line to draw.
+      parts.push('Only ' + coldAll.length + ' cold start(s), near ' +
+                 pct(median(coldAll)) + ' \u2014 too few to trace a trend, so no ' +
+                 'cold line is drawn.');
+    } else if (firstCold > 0) {
+      var change = (lastCold - firstCold) / firstCold;
+      parts.push('Cold error ' +
+        (change > 0.15 ? 'climbs from ' : change < -0.15 ? 'falls from ' : 'holds near ') +
+        pct(firstCold) + ' to ' + pct(lastCold) + ' across the window.');
+    } else {
+      parts.push('Cold error sits near ' + pct(median(coldAll)) + '.');
+    }
+    return parts.join(' ');
+  }
+
+  // The design's "no traces yet" card, shown inside the plot area so the axes
+  // survive. showEmpty() clears its container, which would delete .plot-y,
+  // .plot-area and .plot-x and leave the panel unable to draw again.
+  function emptyCard(area, empty) {
+    if (!area) return;
+    var existing = area.querySelector('[data-rf-item="empty_traces"]');
+    if (!empty) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) return;
+    var card = clone('rf-tpl-empty-traces');
+    if (!card) return;
+    card.style.position = 'absolute';
+    card.style.inset = '0';
+    card.style.display = 'grid';
+    card.style.alignContent = 'center';
+    area.appendChild(card);
   }
 
   function relPct(values, q) {

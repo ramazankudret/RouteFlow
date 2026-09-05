@@ -545,8 +545,8 @@ a:hover{color:#6ff0a4}
         </div>
       </section>
       <section class="span2" data-rf-item="accuracy_error_dist">
-        <div class="pan-h"><h2>signed error spread</h2><span class="n">n 26 &middot; buckets of 10%</span></div>
-        <p class="pan-d">The same 26 traces, counted by how far each landed from its prediction. Left of zero the job finished early; right of zero it ran long. Cold starts pile up on the right &mdash; that is the bias, visible as shape rather than a single number.</p>
+        <div class="pan-h"><h2>signed error spread</h2><span class="n" data-rf="dist_n">n 26 &middot; buckets of 10%</span></div>
+        <p class="pan-d">The same <span data-rf="dist_count">26</span> traces, counted by how far each landed from its prediction. Left of zero the job finished early; right of zero it ran long. Cold starts pile up on the right &mdash; that is the bias, visible as shape rather than a single number.</p>
         <div class="pan-p">(total_ms &minus; predicted_total_ms) / predicted_total_ms</div>
         <div class="hist">
           <div class="hcol" data-rf-item="bucket"><b data-rf="count">1</b><i class="h-cold" data-rf="cold_count" style="height:23.8px"></i><i class="h-warm h-zero" data-rf="warm_count" style="height:0.0px"></i></div>
@@ -566,7 +566,7 @@ a:hover{color:#6ff0a4}
           <span data-rf="bucket_label">+20% &hellip; +30%</span>
           <span data-rf="bucket_label">+30% &hellip; +40%</span>
         </div>
-        <div class="p-legend" style="margin-top:14px"><span><i class="plk" style="background:var(--t-queue)"></i>warm &middot; 14</span><span><i class="plk" style="background:var(--t-load)"></i>cold &middot; 12</span><span style="margin-left:auto">median +6.1% &middot; p90 +28.1% &middot; 8 of 26 finished early</span></div>
+        <div class="p-legend" style="margin-top:14px"><span><i class="plk" style="background:var(--t-queue)"></i><span data-rf="dist_warm">warm &middot; 14</span></span><span><i class="plk" style="background:var(--t-load)"></i><span data-rf="dist_cold">cold &middot; 12</span></span><span style="margin-left:auto" data-rf="dist_summary">median +6.1% &middot; p90 +28.1% &middot; 8 of 26 finished early</span></div>
       </section>
       <section data-rf-item="accuracy_by_node">
         <div class="pan-h"><h2>error by node</h2><span class="n">median |err| &middot; warm vs cold</span></div>
@@ -576,7 +576,8 @@ a:hover{color:#6ff0a4}
           <div class="drow" data-rf-item="node_error">
             <span class="dname" data-rf="node_id">desktop-01</span>
             <div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dlink" style="left:12.67%;width:48.00%"></span><span class="dpt is-warm" data-rf="warm_median" style="left:12.67%"></span><span class="dpt is-cold" data-rf="cold_median" style="left:60.67%"></span></div>
-            <span class="dval"><span class="warm">3.8%</span> warm &middot; <b>5</b><br><span class="cold">18.2%</span> cold &middot; <b>4</b></span>
+            <span class="dval"><span data-rf-item="warm_part"><span class="warm" data-rf="warm_err">3.8%</span> warm &middot; <b data-rf="warm_n">5</b><br></span><span data-rf-item="cold_part"><span class="cold" data-rf="cold_err">18.2%</span> cold &middot; <b data-rf="cold_n">4</b></span><span data-rf-item="no_data" hidden>no data</span></span>
+            <span class="dnote" data-rf="node_note" hidden></span>
           </div>
           <div class="drow" data-rf-item="node_error">
             <span class="dname" data-rf="node_id">jetson-01</span>
@@ -596,32 +597,32 @@ a:hover{color:#6ff0a4}
           </div>
           <div class="drow" data-rf-item="node_error"><span class="dname" data-rf="node_id">nuc-01</span><div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dpt is-none" style="left:0"></span></div><span class="dval is-unknown" data-rf="median_err">no data</span><span class="dnote">no traces in this window &mdash; engine has been down 3 min 12 s</span></div>
         </div>
-        <div class="dax"><span>0</span><span>10%</span><span>20%</span><span>30%</span></div>
+        <div class="dax"><span data-rf="node_axis" style="left:0%">0</span><span data-rf="node_axis" style="left:33.33%">10%</span><span data-rf="node_axis" style="left:66.66%">20%</span><span data-rf="node_axis" style="left:100%">30%</span></div>
       </section>
       <section data-rf-item="accuracy_drift">
-        <div class="pan-h"><h2>calibration drift</h2><span class="n">rolling median &middot; 30 min steps</span></div>
-        <p class="pan-d">Warm error stays flat near 4%. Cold error climbs through the window: the same models take longer to load as the page cache fills with other work, and the estimator follows it with a lag.</p>
+        <div class="pan-h"><h2>calibration drift</h2><span class="n" data-rf="drift_steps">rolling median &middot; 30 min steps</span></div>
+        <p class="pan-d" data-rf="drift_note">Warm error stays flat near 4%. Cold error climbs through the window: the same models take longer to load as the page cache fills with other work, and the estimator follows it with a lag.</p>
         <div class="pan-p">rolling median |err| &middot; shaded band is the cold 1&sigma; spread</div>
         <div class="tl-wrap">
           <div class="tl">
-            <i class="gy" style="bottom:0.00%"></i><span class="tl-y" style="bottom:0.00%">0%</span>
-            <i class="gy" style="bottom:25.00%"></i><span class="tl-y" style="bottom:25.00%">6%</span>
-            <i class="gy" style="bottom:50.00%"></i><span class="tl-y" style="bottom:50.00%">12%</span>
-            <i class="gy" style="bottom:75.00%"></i><span class="tl-y" style="bottom:75.00%">18%</span>
-            <i class="gy" style="bottom:100.00%"></i><span class="tl-y" style="bottom:100.00%">24%</span>
+            <i class="gy" style="bottom:0.00%"></i><span class="tl-y" data-rf="drift_axis" style="bottom:0.00%">0%</span>
+            <i class="gy" style="bottom:25.00%"></i><span class="tl-y" data-rf="drift_axis" style="bottom:25.00%">6%</span>
+            <i class="gy" style="bottom:50.00%"></i><span class="tl-y" data-rf="drift_axis" style="bottom:50.00%">12%</span>
+            <i class="gy" style="bottom:75.00%"></i><span class="tl-y" data-rf="drift_axis" style="bottom:75.00%">18%</span>
+            <i class="gy" style="bottom:100.00%"></i><span class="tl-y" data-rf="drift_axis" style="bottom:100.00%">24%</span>
             <i class="gx" style="left:25%"></i>
             <i class="gx" style="left:50%"></i>
             <i class="gx" style="left:75%"></i>
-            <span class="tl-ev" style="left:63.6%"><b>eviction storm &middot; 04:41 PM</b></span>
+            <span class="tl-ev" data-rf-item="drift_event" style="left:63.6%"><b data-rf="drift_event_label">eviction storm &middot; 04:41 PM</b></span>
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <path class="band-f" d="M 0.00 29.58 L 9.09 22.50 L 18.18 15.42 L 27.27 26.25 L 36.36 10.83 L 45.45 4.58 L 54.55 18.33 L 63.64 7.92 L 72.73 1.25 L 81.82 11.25 L 90.91 17.08 L 100.00 11.25 L 100.00 48.75 L 90.91 54.58 L 81.82 48.75 L 72.73 38.75 L 63.64 45.42 L 54.55 55.83 L 45.45 42.08 L 36.36 48.33 L 27.27 63.75 L 18.18 52.92 L 9.09 60.00 L 0.00 67.08 Z"></path>
+              <path class="band-f" data-rf="cold_band" d="M 0.00 29.58 L 9.09 22.50 L 18.18 15.42 L 27.27 26.25 L 36.36 10.83 L 45.45 4.58 L 54.55 18.33 L 63.64 7.92 L 72.73 1.25 L 81.82 11.25 L 90.91 17.08 L 100.00 11.25 L 100.00 48.75 L 90.91 54.58 L 81.82 48.75 L 72.73 38.75 L 63.64 45.42 L 54.55 55.83 L 45.45 42.08 L 36.36 48.33 L 27.27 63.75 L 18.18 52.92 L 9.09 60.00 L 0.00 67.08 Z"></path>
               <path class="line-c" data-rf="cold_series" d="M 0.00 48.33 L 9.09 41.25 L 18.18 34.17 L 27.27 45.00 L 36.36 29.58 L 45.45 23.33 L 54.55 37.08 L 63.64 26.67 L 72.73 20.00 L 81.82 30.00 L 90.91 35.83 L 100.00 30.00"></path>
               <path class="line-w" data-rf="warm_series" d="M 0.00 78.33 L 9.09 80.00 L 18.18 83.75 L 27.27 81.67 L 36.36 85.00 L 45.45 82.92 L 54.55 84.17 L 63.64 80.83 L 72.73 83.33 L 81.82 84.58 L 90.91 82.50 L 100.00 82.92"></path>
             </svg>
           </div>
-          <div class="tl-x"><span>11:20 AM</span><span>02:20 PM</span><span>05:04 PM</span></div>
+          <div class="tl-x"><span data-rf="drift_time">11:20 AM</span><span data-rf="drift_time">02:20 PM</span><span data-rf="drift_time">05:04 PM</span></div>
         </div>
-        <div class="p-legend" style="margin-top:14px"><span><i class="pll" style="background:var(--t-queue)"></i>warm rolling median</span><span><i class="pll" style="background:var(--t-load)"></i>cold rolling median</span><span style="margin-left:auto">cold error nearly doubled across the window</span></div>
+        <div class="p-legend" style="margin-top:14px"><span><i class="pll" style="background:var(--t-queue)"></i>warm rolling median</span><span><i class="pll" style="background:var(--t-load)"></i>cold rolling median</span><span style="margin-left:auto" data-rf="drift_summary">cold error nearly doubled across the window</span></div>
       </section>
         </div>
         <p class="a-note">Every view puts prediction and measurement side by side and never averages the two error kinds together. The scatters show individual traces, the spread shows the shape of the bias, the per-node view shows where cold starts are expensive, and the drift view shows the estimator losing ground as the window fills. Warm keeps the <b>t_queue</b> blue and cold the <b>t_load</b> orange used everywhere else in the console, so colour means the same thing on every screen.</p>
@@ -636,6 +637,20 @@ a:hover{color:#6ff0a4}
   </div>
 <template id="rf-tpl-scatter-point">
               <span class="dot is-warm" data-rf-item="trace" style="left:55.13%;bottom:54.50%"><span hidden data-rf="predicted_total_ms">8820</span><span hidden data-rf="total_ms">8720</span></span>
+</template>
+<template id="rf-tpl-bucket">
+          <div class="hcol" data-rf-item="bucket"><b data-rf="count">1</b><i class="h-cold" style="height:23.8px"></i><i class="h-warm h-zero" style="height:0.0px"></i></div>
+</template>
+<template id="rf-tpl-bucket-label">
+          <span data-rf="bucket_label">-30% &hellip; -20%</span>
+</template>
+<template id="rf-tpl-node-error">
+          <div class="drow" data-rf-item="node_error">
+            <span class="dname" data-rf="node_id">desktop-01</span>
+            <div class="dtrack"><i class="gl" style="left:33.33%"></i><i class="gl" style="left:66.66%"></i><i class="gl" style="left:100%"></i><span class="dlink" style="left:12.67%;width:48.00%"></span><span class="dpt is-warm" style="left:12.67%"></span><span class="dpt is-cold" style="left:60.67%"></span></div>
+            <span class="dval"><span data-rf-item="warm_part"><span class="warm" data-rf="warm_err">3.8%</span> warm &middot; <b data-rf="warm_n">5</b><br></span><span data-rf-item="cold_part"><span class="cold" data-rf="cold_err">18.2%</span> cold &middot; <b data-rf="cold_n">4</b></span><span data-rf-item="no_data" hidden>no data</span></span>
+            <span class="dnote" data-rf="node_note" hidden></span>
+          </div>
 </template>
 <template id="rf-tpl-empty-traces">
           <div class="empty" data-rf-item="empty_traces"><div class="empty-t">No traces yet</div><div class="empty-d">Accuracy needs finished jobs that carry both a prediction and a measurement. Nothing has completed since the scheduler started.</div></div>

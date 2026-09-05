@@ -179,6 +179,43 @@ Karar başlığı: `decided_by`, `margin_ms`.
 `conf` üç değer alır: `seeded` | `learning` | `converged` — modelin bu tahmini
 ne kadar veriye dayandırdığı. Rozet olarak göster.
 
+### Ekran D'nin türetilmiş kancaları
+
+Ekran D'deki sayıların çoğu bir trace alanı değil; `rf-bind.js` bunları aynı
+iş kümesinden hesaplıyor. Tasarım revize edilirse bu adlar korunmalı,
+çünkü karşılıkları trace'te aranarak bulunamaz:
+
+```
+timing_all_value   timing_all_note
+timing_warm_label  timing_warm_value  timing_warm_note
+timing_cold_label  timing_cold_value  timing_cold_note
+timing_worst_value timing_worst_note
+
+length_all_value   length_all_note
+length_over_value  length_over_note
+length_early_value length_early_note
+length_worst_value length_worst_note
+
+dist_n  dist_count  dist_warm  dist_cold  dist_summary
+        + tekrarlanan blok: rf-tpl-bucket, rf-tpl-bucket-label
+
+node_axis  warm_err  warm_n  cold_err  cold_n  node_note
+        + tekrarlanan blok: rf-tpl-node-error
+
+drift_steps  drift_axis  drift_time  drift_note  drift_summary
+drift_event  drift_event_label  cold_band
+```
+
+**Geometri kancayla yazılmaz.** Histogram çubukları (`.h-warm` / `.h-cold`),
+dumbbell noktaları (`.dpt`) ve saçılım noktaları sınıfla seçilir. Aynı kanca
+adı sayfada hem metin hem geometri taşıyabiliyor; `setHook` belge genelinde
+yazıyor ve bu, bir kez sayıları çubukların içine doldurmuştu.
+
+**Boş pencere bir durumdur, bir istisna değil.** Ekran D'nin her paneli
+kendi boşluğunu söylemek zorunda — hiç iş yokken fikstür sayılarının
+kalması, hiç çalışmamış bir zamanlayıcı için eksiksiz bir ölçüm seti
+iddia etmek demek.
+
 ---
 
 ## 3. Gerçek örnek veri
