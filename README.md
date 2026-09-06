@@ -101,6 +101,7 @@ bench/phase2.sh --uncapped            #   ... on a workload that states no max_t
 bench/phase3.sh                       # Phase 3: placement against the engine's LRU
 bench/phase3.sh --think-ms 8000       #   ... with gaps between turns
 bench/real_learning.sh                # the estimator against a real engine
+bench/real_two_node.sh                # Warmth vs RoundRobin on a GPU and a CPU engine
 ```
 
 Analysis over any trace, no re-run needed:
@@ -125,22 +126,31 @@ python3 bench/predictive_ceiling.py "bench/results-*/lru-run*.jsonl"
 | `docs/PHASE3-RESULTS.md` | **retracted** — it measured the wrong scenario, and says so |
 | `docs/PHASE3-RESULTS-PRESSURE.md` | the corrected campaign |
 | `docs/PHASE4-DECISION.md` | predictive placement: measured, and declined |
-| `docs/REAL-HARDWARE-RESULTS.md` | the estimator on an actual GPU — the only comparison here that is not simulated |
+| `docs/REAL-HARDWARE-RESULTS.md` | the estimator on an actual GPU |
+| `docs/REAL-TWO-NODE-RESULTS.md` | Warmth against RoundRobin on two real engines, GPU and CPU |
 
 ## What is not claimed
 
-Every **policy** comparison in `docs/` was measured on **simulated nodes**.
-Their rates come from `bench/profiles/`, seeded from real hardware but not equal
-to it. What transfers is the mechanism and the sign of each effect, not the
-seconds. Routing, cold starts and wall-clock all need several GPUs to test for
-real, and this project had one.
+Most comparisons in `docs/` were measured on **simulated nodes**, whose rates
+come from `bench/profiles/` — seeded from real hardware but not equal to it.
+What transfers from those is the mechanism and the sign of each effect, not the
+seconds.
 
-The exception is the estimator. `docs/REAL-HARDWARE-RESULTS.md` measures the
-learned cost model against the static one on an actual RTX 4060: the median
-timing error roughly halves, 26 of 30 paired requests improve, and the seeded
-prefill rate for that card turns out to be about seven times optimistic. That is
-one run of thirty requests on one node, which is weaker evidence than the
-simulated campaigns, and the document says so.
+Two are not simulated:
+
+- `docs/REAL-HARDWARE-RESULTS.md` — the learned cost model against the static
+  one on an actual RTX 4060. Median timing error roughly halves, 26 of 30 paired
+  requests improve, and the seeded prefill rate for that card turns out to be
+  about seven times optimistic.
+- `docs/REAL-TWO-NODE-RESULTS.md` — Warmth against RoundRobin, on two real
+  engines: one on the card, one on the CPU. Warmth is 24% faster on wall-clock,
+  25/25 pairwise, **while taking nineteen times more cold starts** — which is
+  the premise working rather than failing.
+
+Both are single sittings on one machine, weaker evidence than the five-run
+simulated campaigns, and both documents say where they are weak. TTFT in
+particular goes the wrong way in the two-node run, and that is reported rather
+than buried.
 
 The reports say what did not work as plainly as what did. Phase 3 failed its
 exit criterion on saturated traffic and met it once the workload left gaps.
