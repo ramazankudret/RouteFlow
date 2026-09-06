@@ -113,18 +113,19 @@ void harvest_from_tail(const std::string& tail, AttemptResult& out) {
 }  // namespace
 
 Dispatcher::Dispatcher(RouterState& state, NodeRegistry& registry, TraceWriter& trace,
-                       std::string node_token, int request_timeout_ms)
+                       std::string node_token, int request_timeout_ms, bool request_usage)
     : state_(state),
       registry_(registry),
       trace_(trace),
       node_token_(std::move(node_token)),
-      request_timeout_ms_(request_timeout_ms) {}
+      request_timeout_ms_(request_timeout_ms),
+      request_usage_(request_usage) {}
 
 void Dispatcher::handle(const http::Request& client_req, http::Responder& res) {
     const int64_t ts_received = now_ms();
 
     IngestResult in;
-    if (!ingest(client_req, in)) {
+    if (!ingest(client_req, in, request_usage_)) {
         res.send_error(in.error_type == "not_found" ? 404 : 400, in.error_type,
                        in.error);
         return;
@@ -198,7 +199,10 @@ void Dispatcher::handle(const http::Request& client_req, http::Responder& res) {
         up.port = cfg->dispatch_port();
         up.method = "POST";
         up.path = in.upstream_path;
-        up.body = client_req.body;  // proxied byte for byte; never rewritten
+        // Byte for byte, except for the usage request ingest may have added
+        // (D37) -- the only rewrite this router performs, and the only reason
+        // it can learn anything from a real engine.
+        up.body = in.upstream_body.empty() ? client_req.body : in.upstream_body;
         up.connect_timeout_ms = 5000;
         up.read_timeout_ms = request_timeout_ms_;
         up.headers.set("Content-Type",

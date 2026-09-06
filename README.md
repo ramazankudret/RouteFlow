@@ -68,6 +68,16 @@ routeflow-router --nodes nodes.json --trace trace.jsonl \
 It speaks the OpenAI and Ollama chat APIs, so existing tooling points at it
 unchanged. The operator console is at `http://127.0.0.1:8970`.
 
+One caveat worth knowing before you point a client at it. On the OpenAI shape a
+streamed reply carries no token counts unless they are asked for, and the cost
+model cannot learn without them, so the router adds
+`stream_options: {include_usage: true}` to streaming OpenAI requests. Your
+client therefore receives one extra final chunk carrying `usage` and an empty
+`choices` array — standard OpenAI, but it will break a client that assumes
+`choices[0]` is always present. Turn it off with `--dispatch.request_usage
+false` and the router is a byte-for-byte proxy again, with the learned cost
+model reduced to its seeds on that path (D37).
+
 ### Against simulated nodes
 
 A heterogeneous cluster on one machine, which is how every published result in

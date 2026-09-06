@@ -415,7 +415,11 @@ int main(int argc, char** argv) {
         placement.observe(r);
     });
 
-    rf::Dispatcher dispatcher(state, registry, trace, node_token, request_timeout_ms);
+    // Off turns the router back into a byte-for-byte proxy, at the cost of the
+    // cost model learning nothing from an OpenAI-shaped stream (D37).
+    const bool request_usage = cfg.get_bool("dispatch.request_usage", true);
+    rf::Dispatcher dispatcher(state, registry, trace, node_token, request_timeout_ms,
+                              request_usage);
 
     registry.start(node_token, poll_ms, node_timeout_ms);
     placement.start();

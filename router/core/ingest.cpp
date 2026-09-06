@@ -45,7 +45,7 @@ uint32_t requested_num_ctx(const Json& body) {
 
 }  // namespace
 
-bool ingest(const http::Request& req, IngestResult& out) {
+bool ingest(const http::Request& req, IngestResult& out, bool request_usage) {
     out = IngestResult();
 
     if (req.path == "/v1/chat/completions") {
@@ -75,6 +75,30 @@ bool ingest(const http::Request& req, IngestResult& out) {
         out.error_type = "invalid_request_error";
         out.error = "request has no \"model\"";
         return false;
+    }
+
+    // The one rewrite (D37). On the OpenAI shape a streamed reply carries no
+    // token counts unless the caller asks for them, and Ollama follows that
+    // exactly. Without the counts `observe()` learns no decode rate, no prefill
+    // rate and no output length, so against a real engine the learned cost
+    // model silently degenerates into the static one -- which is what a run on
+    // real hardware showed.
+    //
+    // Only the OpenAI shape, only when streaming, and never over a caller who
+    // set `stream_options` themselves. The Ollama-native shapes already report
+    // `eval_count` and need nothing.
+    //
+    // The cost is one extra chunk to the client, carrying usage and no choices.
+    // That is the documented OpenAI shape, but this client did not ask for it,
+    // so it is a real change to what they receive and `dispatch.request_usage`
+    // turns it off.
+    if (out.shape == ApiShape::OpenAIChat && request_usage &&
+        body.has("stream") && body["stream"].as_bool() && !body.has("stream_options")) {
+        Json rewritten = body;
+        Json options = Json::object();
+        options["include_usage"] = Json(true);
+        rewritten["stream_options"] = std::move(options);
+        out.upstream_body = rewritten.dump();
     }
 
     // Ollama streams by default; OpenAI does not.

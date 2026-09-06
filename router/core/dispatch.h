@@ -17,8 +17,12 @@ namespace rf {
 
 class Dispatcher {
 public:
+    // `request_usage`: ask an OpenAI-shaped stream for its token totals, so the
+    // cost model has something to learn from. Costs the client one extra chunk
+    // (D37).
     Dispatcher(RouterState& state, NodeRegistry& registry, TraceWriter& trace,
-               std::string node_token, int request_timeout_ms);
+               std::string node_token, int request_timeout_ms,
+               bool request_usage = true);
 
     // Handles one client request end to end: ingest, score, reserve, proxy,
     // record. Writes the client response itself.
@@ -30,6 +34,7 @@ private:
     TraceWriter& trace_;
     std::string node_token_;
     int request_timeout_ms_;
+    bool request_usage_;
 };
 
 }  // namespace rf

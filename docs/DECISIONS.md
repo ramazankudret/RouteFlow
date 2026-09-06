@@ -820,3 +820,46 @@ Two wrong turns are worth recording, because both looked right:
 Verified on the hardware that produced the failure: all four requests served,
 `t_load` zero on the three that followed the load, and the load estimate no
 longer appearing in their predictions.
+
+### D37 — The router asks an OpenAI-shaped stream for its token counts · Settled
+
+The real-hardware run left three fields null in every record: `output_tokens`,
+`prompt_tokens_actual` and `load_ms`. Those are `observe()`'s inputs. Without
+them the learned cost model has no decode rate, no prefill rate and no output
+length to learn, so **against a real engine it silently degenerates into the
+static model** — and every number Phase 2 reports depends on them arriving. The
+simulated node always sent them, which is why five campaigns never noticed.
+
+Measured against the engine rather than guessed:
+
+```
+OpenAI path, stream, no stream_options   no usage at all
+OpenAI path, stream, include_usage       prompt_tokens 30, completion_tokens 8
+native /api/chat, stream                 the same, plus load_duration
+```
+
+So the OpenAI shape carries no counts unless the caller asks, and Ollama follows
+that faithfully. The Ollama-native shapes were never affected: they report
+`eval_count` unprompted and the dispatcher already reads it.
+
+**This breaks a stated invariant, so it is stated back.** `ingest.h` and
+`dispatch.cpp` both said the body is proxied byte for byte and never rewritten.
+It now has exactly one rewrite: `stream_options: {include_usage: true}`, added
+only on the OpenAI shape, only when streaming, and never over a caller who set
+`stream_options` themselves.
+
+The client pays for it. Measured: seven chunks instead of six, the extra one
+carrying usage and an empty `choices` array. That is the documented OpenAI
+shape, but this client did not ask for it, and a client that assumes
+`choices[0]` exists on every chunk will break on it. `dispatch.request_usage
+false` restores the byte-for-byte proxy — verified in both directions — at the
+cost of the cost model learning nothing from that path.
+
+`load_ms` stays null here. Only the native path reports `load_duration`, and
+reaching it would mean translating between the two APIs rather than proxying,
+which is a larger change than this one and against §2 and D18. D19's bootstrap
+already recovers a load time from ttft, so the gap is bounded and handled.
+
+What this bought, on the card: `prompt_tokens_actual` arriving as 36 against an
+estimated 33 — D15's estimator running about 8% low on short prompts, which
+until now was unmeasurable outside simulation.
