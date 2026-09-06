@@ -100,6 +100,7 @@ bench/phase2.sh                       # Phase 2: learned cost model against stat
 bench/phase2.sh --uncapped            #   ... on a workload that states no max_tokens
 bench/phase3.sh                       # Phase 3: placement against the engine's LRU
 bench/phase3.sh --think-ms 8000       #   ... with gaps between turns
+bench/real_learning.sh                # the estimator against a real engine
 ```
 
 Analysis over any trace, no re-run needed:
@@ -124,15 +125,22 @@ python3 bench/predictive_ceiling.py "bench/results-*/lru-run*.jsonl"
 | `docs/PHASE3-RESULTS.md` | **retracted** — it measured the wrong scenario, and says so |
 | `docs/PHASE3-RESULTS-PRESSURE.md` | the corrected campaign |
 | `docs/PHASE4-DECISION.md` | predictive placement: measured, and declined |
+| `docs/REAL-HARDWARE-RESULTS.md` | the estimator on an actual GPU — the only comparison here that is not simulated |
 
 ## What is not claimed
 
-Every comparative result in `docs/` was measured on **simulated nodes**. Their
-rates come from `bench/profiles/`, seeded from real hardware but not equal to
-it. What transfers is the mechanism and the sign of each effect, not the
-seconds. A single real engine validated the plumbing and the trace (Phase 0);
-no comparative campaign has been reproduced on real hardware, because that needs
-several GPUs.
+Every **policy** comparison in `docs/` was measured on **simulated nodes**.
+Their rates come from `bench/profiles/`, seeded from real hardware but not equal
+to it. What transfers is the mechanism and the sign of each effect, not the
+seconds. Routing, cold starts and wall-clock all need several GPUs to test for
+real, and this project had one.
+
+The exception is the estimator. `docs/REAL-HARDWARE-RESULTS.md` measures the
+learned cost model against the static one on an actual RTX 4060: the median
+timing error roughly halves, 26 of 30 paired requests improve, and the seeded
+prefill rate for that card turns out to be about seven times optimistic. That is
+one run of thirty requests on one node, which is weaker evidence than the
+simulated campaigns, and the document says so.
 
 The reports say what did not work as plainly as what did. Phase 3 failed its
 exit criterion on saturated traffic and met it once the workload left gaps.
