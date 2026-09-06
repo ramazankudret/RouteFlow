@@ -541,6 +541,20 @@
     var admitted = (job.candidates || []).filter(function (c) { return c.admitted; });
 
     setHook(host, 'job_id', shortId(job.job_id));
+    // The one field in this meta line that was never hooked, sitting between
+    // three that were. D15: the estimate is what the router scheduled on and
+    // the actual is what the engine counted, so when both exist the actual is
+    // shown and the title says the estimate it was scheduled against.
+    var actual = job.prompt_tokens_actual;
+    var est = job.prompt_tokens_est;
+    var shown = isMissing(actual) ? est : actual;
+    setHook(host, 'prompt_tokens', isMissing(shown) ? null : shown + ' tok');
+    var promptEl = host.querySelector('[data-rf="prompt_tokens"]');
+    if (promptEl) {
+      promptEl.title = isMissing(actual)
+        ? 'estimated; the engine reported no prompt token count'
+        : 'counted by the engine; the router scheduled against ' + est;
+    }
     setHook(host, 'candidate_count', (job.candidates || []).length);
     setHook(host, 'admitted_count', admitted.length);
     setHook(host, 'model', job.model);
@@ -1344,6 +1358,19 @@
   // console to mislead. A node whose engine cannot report residency is not
   // counted as holding nothing warm; it is left out of the total, because
   // "warm 3" would be a claim we cannot make (rule 2).
+  // The two cards in the world that are not nodes. They shipped with fixture
+  // labels -- a scheduler on port 11500 and three connected apps -- and neither
+  // is something the router had been asked. One it knows exactly; the other it
+  // cannot know at all, so the card says what it does know instead of asserting
+  // a client count nothing measures.
+  function renderWorldCards() {
+    setHook(document, 'router_endpoint', location.host + ' \u00b7 scheduler');
+    var n = state.jobs.length;
+    setHook(document, 'client_summary',
+      n ? n + ' job' + (n === 1 ? '' : 's') + ' \u00b7 openai-compatible'
+        : 'no traffic yet \u00b7 openai-compatible');
+  }
+
   function renderHeader() {
     var up = 0, warm = 0, inflight = 0, unknown = 0;
     state.nodes.forEach(function (n) {
@@ -1360,6 +1387,7 @@
 
   function repaint() {
     renderHeader();
+    renderWorldCards();
     if (document.getElementById('rf-world') &&
         document.getElementById('rf-tpl-node-inspector')) {
       renderCluster(state.nodes);

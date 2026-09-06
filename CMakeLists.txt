@@ -78,3 +78,20 @@ add_test(NAME selftest COMMAND rf_selftest)
 add_executable(rf_policytest tests/policy_test.cpp)
 target_link_libraries(rf_policytest PRIVATE rf_router)
 add_test(NAME policytest COMMAND rf_policytest)
+
+# /snapshot's guarantees are properties of the running server, not of a linked
+# function: the handler is inline in main() behind a real socket. So this one is
+# a script that drives the built binaries. Registered here because a test
+# nothing runs is a test that rots -- it was already the only suite outside
+# ctest and the only one anybody had to remember.
+find_program(BASH_EXECUTABLE bash)
+if(BASH_EXECUTABLE)
+  add_test(NAME snapshot_auth
+           COMMAND ${BASH_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/snapshot_auth.sh
+                   --bin $<TARGET_FILE_DIR:routeflow-router>)
+  # It binds two loopback ports and starts two processes, so it must not race
+  # another copy of itself.
+  set_tests_properties(snapshot_auth PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+else()
+  message(STATUS "bash not found: tests/snapshot_auth.sh will not run under ctest")
+endif()

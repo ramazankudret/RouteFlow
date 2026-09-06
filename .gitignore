@@ -20,3 +20,6 @@ bench/results/
 .idea/
 *.swp
 .DS_Store
+
+# Python bytecode from the bench scripts.
+__pycache__/

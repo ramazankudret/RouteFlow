@@ -29,6 +29,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Kept next to the router port so --port moves both, and two copies of this
+# script cannot collide on the agent.
+AGENT_PORT=$((PORT - 1))
 WORK="$(mktemp -d)"
 TOKEN="selftest-$$"
 FAILURES=0
@@ -60,11 +63,11 @@ status_of() {  # $1 path, $2 optional bearer
   curl "${args[@]}" "http://127.0.0.1:${PORT}$1"
 }
 
-echo "{ \"nodes\": [ { \"id\": \"sim\", \"endpoint\": \"127.0.0.1:8978\" } ] }" \
+echo "{ \"nodes\": [ { \"id\": \"sim\", \"endpoint\": \"127.0.0.1:${AGENT_PORT}\" } ] }" \
   > "${WORK}/nodes.json"
 
 "${BIN}/routeflow-agent" --simulate "${REPO}/bench/profiles/sim-desktop.json" \
-    --http.port 8978 --node.id sim --log.level error >/dev/null 2>&1 &
+    --http.port "${AGENT_PORT}" --node.id sim --log.level error >/dev/null 2>&1 &
 AGENT_PID=$!
 sleep 1
 
