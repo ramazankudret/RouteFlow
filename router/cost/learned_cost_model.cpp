@@ -25,6 +25,10 @@
 //                               the prediction stored in the record (D31).
 //                               §8 insists the two errors stay apart, and they do.
 //   warm_job_ms(node)           for T_queue, excluding cold starts (D6).
+//   footprint_ratio(model)      observed VRAM over disk size, harvested from
+//                               any node that holds the model. Weights are the
+//                               same bytes on every GPU, so one node's
+//                               measurement prices a load onto another (D35).
 //
 // The split is the point. Fitting one function to "how long will this take"
 // would let a bad load estimate corrupt the decode rate, and there would be no
@@ -67,6 +71,10 @@ struct Ewma {
 // node.
 constexpr uint32_t kMinSamples = 3;
 
+// The context an engine allocates KV for by default, and therefore what an
+// observed resident size already includes. Ollama's default.
+constexpr uint32_t kObservedCtxBaseline = 4096;
+
 Confidence confidence_for(uint32_t samples) {
     if (samples < kMinSamples) return Confidence::Seeded;
     if (samples < 20) return Confidence::Learning;
@@ -84,11 +92,54 @@ public:
 
     uint64_t footprint_bytes(const std::string& model, const NodeState& node,
                              uint32_t num_ctx) const override {
-        // Observed footprint would be better, but nothing in a v1 trace records
-        // the VRAM delta across a load, so this stays seeded and says so. It is
-        // the one quantity Phase 2 cannot improve without a schema change, and
-        // pretending otherwise would be the easiest lie to tell here.
-        return seed_footprint_bytes(model, node, num_ctx, scoring_);
+        // If this node holds it, that is the measurement and the seed already
+        // returns it. What was left seeded is the case that actually matters:
+        // pricing a load onto a node that does *not* hold the model, while
+        // another one does.
+        //
+        // The engine reports resident VRAM per model, so the overhead over disk
+        // size is observable rather than assumed. It is learned as a ratio
+        // because a ratio transfers between nodes and an absolute does not: the
+        // weights are the same bytes on any GPU. Measured on this project's own
+        // card the ratio is 1.014, against a seeded 1.08 plus a KV term -- the
+        // seed overshoots by 9.6%, which is 456 MB of admission headroom
+        // refused per model on an 8 GB card (D35).
+        if (node.resident_bytes(model) > 0) {
+            return seed_footprint_bytes(model, node, num_ctx, scoring_);
+        }
+        const uint64_t disk = node.disk_bytes(model);
+        const Ewma* ratio = find(footprint_ratio_, model);
+        if (disk == 0 || !ratio || !ratio->has(kMinSamples)) {
+            return seed_footprint_bytes(model, node, num_ctx, scoring_);
+        }
+        // The observed total already contains the KV cache the engine allocated
+        // at its own default context. Only context asked for *beyond* that is
+        // charged again, and the excess is charged rather than ignored because
+        // under-estimating a footprint admits a node that cannot serve the
+        // request -- a routing failure, not a slow reply.
+        const double base = static_cast<double>(disk) * ratio->value;
+        const double extra_ctx =
+            num_ctx > kObservedCtxBaseline ? num_ctx - kObservedCtxBaseline : 0.0;
+        const double gib = static_cast<double>(disk) / (1024.0 * 1024.0 * 1024.0);
+        return static_cast<uint64_t>(base + extra_ctx * 8.0 * 1024.0 * gib);
+    }
+
+    // Every node the scorer walks is a chance to see what a model really costs.
+    // estimate() is const because scoring must not change a decision, but
+    // recording an observation is not a decision, so the store is mutable.
+    void harvest(const NodeState& node) const {
+        for (const auto& m : node.models_resident) {
+            const uint64_t disk = node.disk_bytes(m.name);
+            if (m.vram_bytes == 0 || disk == 0) continue;
+            const double ratio = static_cast<double>(m.vram_bytes) /
+                                 static_cast<double>(disk);
+            // A ratio below one means the engine is reporting something other
+            // than a resident copy of these weights -- a partial offload, or a
+            // name collision with a different quantisation. Not a measurement
+            // of this model's footprint, so it is dropped rather than averaged.
+            if (ratio < 1.0 || ratio > 4.0) continue;
+            footprint_ratio_[m.name].add(ratio, scoring_.ewma_halflife);
+        }
     }
 
     OutputPrediction predict_output(const RequestFeatures& req) const override {
@@ -126,6 +177,7 @@ public:
     Estimate estimate(const RequestFeatures& req, const NodeState& node,
                       const LedgerView& ledger, const EvictionPlan& evict,
                       int64_t now_ms) const override {
+        harvest(node);
         const uint64_t footprint = footprint_bytes(req.model, node, req.num_ctx);
         const SeedRates seeded = seed_rates(node, footprint, scoring_);
         const std::string nm = key2(node.id, req.model);
@@ -333,6 +385,7 @@ private:
     std::map<std::string, Ewma> warm_job_ms_;    // node
     std::map<std::string, Ewma> output_len_;     // model|role
     std::map<std::string, Ewma> output_err_;     // model|role
+    mutable std::map<std::string, Ewma> footprint_ratio_;  // model
 };
 
 }  // namespace

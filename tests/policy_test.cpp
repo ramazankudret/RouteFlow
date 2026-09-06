@@ -11,6 +11,7 @@
 // the second wrong would not be a scheduler, it would be a warmth bias.
 
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -618,6 +619,50 @@ void test_learned_cost_model() {
           "a trace written by another model still teaches the right length");
     check(inherited.sigma < 40.f,
           "and its error is not adopted as our own uncertainty");
+
+    // Footprint: one node holding the model prices a load onto a node that does
+    // not (D35). The weights are the same bytes on any GPU, so the overhead
+    // over disk size transfers where an absolute byte count would not.
+    {
+        auto fp = rf::make_learned_cost_model(scoring);
+        rf::NodeState holder = cluster[1];          // sim-jetson, holds planner
+        rf::NodeState empty = cluster[0];           // sim-desktop, holds nothing
+        const uint64_t disk = holder.disk_bytes("planner:12b");
+        check(disk > 0, "the fixture node reports a disk size to divide by");
+
+        // Real measurement from this project's card: resident VRAM ran 1.4%
+        // above disk size, against a seeded 8% margin plus a KV term.
+        holder.models_resident.clear();
+        rf::ResidentModel observed;
+        observed.name = "planner:12b";
+        observed.vram_bytes = static_cast<uint64_t>(disk * 1.014);
+        holder.models_resident.push_back(observed);
+
+        const uint64_t seeded = fp->footprint_bytes("planner:12b", empty, 4096);
+        for (int i = 0; i < 5; ++i) {
+            // Scoring the holder is what harvests the observation.
+            fp->estimate(req, holder, ledger, none, rf::now_ms());
+        }
+        const uint64_t learned = fp->footprint_bytes("planner:12b", empty, 4096);
+
+        check(learned < seeded,
+              "an observed footprint is smaller than the seeded margin plus KV");
+        check(std::llabs(static_cast<long long>(learned) -
+                         static_cast<long long>(disk * 1.014)) < disk / 100,
+              "and lands on the ratio that was actually observed");
+
+        // Asking for more context than the engine's default allocates has to
+        // cost more, or a large-context request is admitted onto a node that
+        // cannot hold it -- an admission failure, not a slow reply.
+        const uint64_t roomy = fp->footprint_bytes("planner:12b", empty, 32768);
+        check(roomy > learned,
+              "context beyond the observed baseline is charged, not ignored");
+
+        // A node that already holds it needs no transfer: that is measurement,
+        // not inference, and the seed path already returns it.
+        check(fp->footprint_bytes("planner:12b", holder, 4096) == observed.vram_bytes,
+              "a node holding the model reports what it actually occupies");
+    }
 
     // A failed job describes a broken transfer, not a node's speed.
     auto fresh = rf::make_learned_cost_model(scoring);

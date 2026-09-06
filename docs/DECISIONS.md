@@ -482,6 +482,14 @@ this file. Closing it needs a second VRAM reading after the load settles, which
 is a schema and an agent change, and belongs to whichever phase actually needs
 the accuracy.
 
+**Superseded in part by D35.** The last paragraph was wrong about the data. It
+is true that the *trace* carries no post-load reading, but the live node state
+does: Ollama reports `size_vram` per resident model, the agent has always
+forwarded it as `models_resident[].vram_bytes`, and admission was already
+trusting it to price an eviction. So the measurement existed and was being used
+on one side of the same question while the other side guessed. No schema change
+was needed — only noticing.
+
 ### D25 — The router replays its trace on start · Settled
 
 §4.2 said the router "rebuilds it from the trace log on start" and nothing did.
@@ -705,3 +713,43 @@ What is still open is spare capacity — a node idle because nothing needs it,
 which two busy nodes cannot pose. `bench/predictive_ceiling.py` answers the
 question on any trace, so reopening this stays a measurement and not an
 argument.
+
+### D35 — A resident model's real footprint prices a load onto a node without it · Settled
+
+D24 said `footprint_bytes` could not be learned. It was half right, and the half
+it got wrong was the half that mattered.
+
+`seed_footprint_bytes` already returns the measured size when *this* node holds
+the model. What stayed a guess was the case admission actually turns on: what a
+load will cost on a node that does **not** hold it, while another node does.
+That guess was `disk_bytes × 1.08 + kv(num_ctx)`.
+
+Against this project's own card the guess is 9.6% high — 5.204 GB predicted
+against 4.748 GB actually resident, for a model whose disk size is 4.683 GB.
+On an 8 GB card that is **456 MB of admission headroom refused per model**,
+which is the difference between two models fitting and one.
+
+The engine reports the real number, so the overhead over disk size is learned
+from any node that holds the model and applied to nodes that do not. It is
+learned as a **ratio** rather than a byte count, because model weights are the
+same bytes on every GPU and a ratio transfers where an absolute does not.
+
+Two guards, both in the direction that matters:
+
+- The observed size already contains the KV cache the engine allocated at its
+  own default context, so only context asked for *beyond* that baseline is
+  charged again. Under-estimating a footprint admits a node that cannot serve
+  the request, which is a routing failure rather than a slow reply (D2).
+- A ratio below 1.0 or above 4.0 is dropped rather than averaged. Below one is
+  not a resident copy of these weights — a partial offload, or a name shared
+  with a different quantisation — and averaging it would quietly shrink every
+  later estimate.
+
+Harvesting happens in `estimate()`, which walks every candidate node anyway.
+That method is `const` because scoring must not change a decision; recording an
+observation is not a decision, so the store is `mutable` and nothing about the
+ranking depends on it.
+
+`static-v1` keeps the seeded formula. It is the baseline every phase is measured
+against, and a baseline that improves alongside the thing it measures stops
+being one.

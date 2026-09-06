@@ -87,8 +87,11 @@ should be quoted with its campaign attached. See
 
 ## What is still seeded
 
-`footprint_bytes` (D24). A v1 trace records the footprint the router *expected*,
-not the VRAM the load actually took, so there is nothing to correct against.
+`footprint_bytes` was seeded here (D24) and no longer is: the engine reports
+resident VRAM per model and the router now learns the overhead from it (D35).
+The paragraph below is what was believed at the time, and it was wrong about
+the data — the trace has no post-load reading, but the live node state always
+did.
 Closing it needs a second VRAM reading after a load settles — an agent and
 schema change that belongs to whichever phase needs the accuracy, not to this
 one. It is left visible rather than quietly approximated, because a footprint
