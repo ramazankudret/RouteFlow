@@ -13,6 +13,7 @@
 
 namespace rf {
 
+
 // One row of the cost model's hardware seed table (§8: "a static table keyed by
 // GPU class so a fresh cluster is not useless on its first request").
 //
@@ -70,6 +71,31 @@ struct ScoringConfig {
 
     static ScoringConfig from_config(const class Config& cfg);
 };
+
+// Is this model loaded on this node, as far as this router can tell?
+//
+// `node.is_resident` is the engine's answer, and it arrives on a poll: the
+// agent caches a snapshot on its own loop and the router fetches it on another,
+// so the answer can be two intervals behind the load that produced it. The VRAM
+// disappears from telemetry immediately, which is how a node comes to look full
+// for no visible reason.
+//
+// Having just served the model there is first-hand evidence, and it is newer
+// than any poll. `node_stale_ms` is the horizon this router already uses to
+// decide a node's state is too old to act on, so it bounds this too rather than
+// introducing a second constant.
+//
+// Both admission and the cost models need this and must not disagree: if
+// admission believes a node can serve without loading while the estimate prices
+// a full load, the router admits the warm node and then ranks it as if it were
+// cold (D36).
+inline bool believed_loaded(const NodeState& node, const std::string& model,
+                            const LedgerView& ledger, const ScoringConfig& scoring,
+                            int64_t now_ms) {
+    if (node.is_resident(model)) return true;
+    const int64_t served = ledger.last_served_ms(node.id, model);
+    return served > 0 && now_ms - served <= scoring.node_stale_ms;
+}
 
 // What admission decided this request would have to evict on a given node.
 // Passed into estimate() so that T_evict is computed where every other duration

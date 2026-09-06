@@ -770,3 +770,53 @@ ranking depends on it.
 `static-v1` keeps the seeded formula. It is the baseline every phase is measured
 against, and a baseline that improves alongside the thing it measures stops
 being one.
+
+### D36 — A completion outranks a poll that has not caught up · Settled
+
+Found by running the router against a real GPU for the first time since Phase 0.
+One node, an RTX 4060, Ollama in Docker. The first request loaded the model in
+about 50 s. **The next three were refused with 503, `insufficient_vram`, for the
+model already occupying the card.**
+
+The chain explains it. NVML reports free VRAM instantly, so the load is visible
+the moment it happens. Residency comes from Ollama's `/api/ps`, which is also
+instant — measured at 0.01 s — but reaches the router through two caches: the
+agent builds a snapshot on its own poll loop, and the router fetches that
+snapshot on another. For up to two poll intervals the router therefore sees a
+node whose VRAM is gone and whose resident list is empty, which reads exactly
+like a full node that cannot take the model.
+
+The router had better evidence and was not using it: **it had just served that
+model on that node itself.** A completion is first-hand and needs no poll.
+
+`NodeLedger` now remembers when it last finished serving each (node, model), and
+`believed_loaded()` combines that with the engine's own answer. `node_stale_ms`
+bounds the memory — the horizon the router already uses to decide a node's
+state is too old to act on, rather than a second constant invented here.
+
+Being wrong costs a reload, which is a slow reply. Being wrong the other way is
+a 503 for a request the cluster could serve.
+
+**One rule, two callers.** Admission and both cost models consult the same
+function. The first fix only changed admission, and the real run showed why that
+is not enough: requests were admitted, then priced as though they still had to
+load — an 11 s estimate against a 0.7 s reply. On a multi-node cluster that is
+the same defect wearing a quieter costume, since the router would rank the warm
+node as the expensive one and route away from it.
+
+Two wrong turns are worth recording, because both looked right:
+
+- The first version compared the completion against `node.sampled_at_ms`. The
+  router restamps that field with its own clock on receipt (§6.1, so a skewed
+  node clock cannot look permanently fresh), so it marks when the state
+  *arrived*, not when the engine was observed. The comparison was against the
+  wrong instant and the bug survived unchanged.
+- The second version stored the timestamps inside `NodeAccount`, which
+  `release()` erases the moment a node goes idle so that `/admin/stats` lists
+  only live nodes. The memory was deleted milliseconds after being written — at
+  exactly the moment it becomes the only evidence anyone has. It lives beside
+  the accounts now, not inside them.
+
+Verified on the hardware that produced the failure: all four requests served,
+`t_load` zero on the three that followed the load, and the load estimate no
+longer appearing in their predictions.

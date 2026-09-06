@@ -42,6 +42,13 @@ AdmissionResult admit(const RequestFeatures& req, const NodeState& node,
         return out;
     }
 
+    // Being wrong here costs a reload, which is a slow reply. Being wrong the
+    // other way is a 503 for a request the cluster could serve (D36).
+    if (believed_loaded(node, req.model, ledger, scoring, now_ms)) {
+        out.admitted = true;
+        return out;
+    }
+
     // A node that reports no VRAM total has no telemetry to constrain against.
     // Admitting it unconditionally would let a 70B model onto a Raspberry Pi;
     // rejecting it would make every no-telemetry node useless. The engine is

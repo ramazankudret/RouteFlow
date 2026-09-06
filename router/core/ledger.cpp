@@ -82,6 +82,12 @@ void NodeLedger::release(Token token) {
     auto bit = acc.busy_models.find(e.model);
     if (bit != acc.busy_models.end() && --bit->second == 0) acc.busy_models.erase(bit);
 
+    // Released after the load finished means the engine held this model to do
+    // the work, whatever became of the reply afterwards. Released while still
+    // loading means it may never have become resident, so that is not evidence
+    // and is not recorded (D36).
+    if (!e.loading) last_served_[e.node_id + '\x1f' + e.model] = now_ms();
+
     if (e.loading) {
         // Released while still loading: the request failed or was aborted.
         acc.reserved_vram = acc.reserved_vram > e.footprint_bytes
@@ -125,6 +131,12 @@ bool NodeLedger::model_busy(const std::string& node_id, const std::string& model
     const NodeAccount* acc = find(node_id);
     if (!acc) return false;
     return acc->busy_models.count(model) > 0;
+}
+
+int64_t NodeLedger::last_served_ms(const std::string& node_id,
+                                   const std::string& model) const {
+    auto it = last_served_.find(node_id + '\x1f' + model);
+    return it == last_served_.end() ? 0 : it->second;
 }
 
 Json NodeLedger::to_json() const {

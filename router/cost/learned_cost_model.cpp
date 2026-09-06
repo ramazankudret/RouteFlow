@@ -227,7 +227,9 @@ public:
         if (!node.residency_known) {
             e.t_load_ms = 0;
             e.omitted_terms |= kTermLoad;
-        } else if (node.is_resident(req.model)) {
+        } else if (believed_loaded(node, req.model, ledger, scoring_, now_ms)) {
+            // The same rule admission used, so a node cannot be admitted as
+            // warm and then ranked as though it had to load (D36).
             e.t_load_ms = 0;
         } else if (const PendingLoad* pend = ledger.pending(node.id, req.model)) {
             const double elapsed = static_cast<double>(now_ms - pend->started_ms);

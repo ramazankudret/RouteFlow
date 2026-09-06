@@ -53,6 +53,8 @@ public:
     const PendingLoad* pending(const std::string& node_id,
                                const std::string& model) const override;
     bool model_busy(const std::string& node_id, const std::string& model) const override;
+    int64_t last_served_ms(const std::string& node_id,
+                           const std::string& model) const override;
 
     // Diagnostics for /admin/stats and the UI.
     Json to_json() const;
@@ -81,6 +83,12 @@ private:
 
     std::map<std::string, NodeAccount> nodes_;
     std::map<Token, Entry> entries_;
+
+    // "node|model -> when we last finished serving it there". Deliberately not
+    // part of NodeAccount: an account is live accounting and is erased the
+    // moment a node goes idle, which is precisely when this fact becomes the
+    // only evidence anyone has (D36).
+    std::map<std::string, int64_t> last_served_;
     Token next_token_ = 1;
 };
 

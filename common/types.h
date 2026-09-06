@@ -192,6 +192,11 @@ public:
     // Models this router is currently generating with, so they are not evictable.
     virtual bool model_busy(const std::string& node_id,
                             const std::string& model) const = 0;
+    // When this router last finished serving `model` on `node_id`, epoch ms;
+    // 0 if never. A node's residency list arrives on a poll, but a completion
+    // is first-hand and can be newer than the most recent poll.
+    virtual int64_t last_served_ms(const std::string& node_id,
+                                   const std::string& model) const = 0;
 };
 
 // A LedgerView that reports an idle cluster. Used by tests and by the bench
@@ -206,6 +211,9 @@ public:
     }
     bool model_busy(const std::string&, const std::string&) const override {
         return false;
+    }
+    int64_t last_served_ms(const std::string&, const std::string&) const override {
+        return 0;
     }
 };
 

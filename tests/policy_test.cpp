@@ -193,6 +193,57 @@ void test_admission() {
 
 // --- the central claim ------------------------------------------------------
 
+// The window between a load finishing and the next poll observing it. Found on
+// real hardware: the card had just spent 75 s loading a 4.9 GB model, NVML
+// reported the VRAM gone, and Ollama's residency list had not caught up. Three
+// requests for that exact model were refused for want of VRAM the model itself
+// was occupying (D36).
+void test_admission_trusts_its_own_completion() {
+    section("admission in the window after a load (D36)");
+
+    const rf::ScoringConfig scoring = bench_scoring();
+    auto cost = rf::make_static_cost_model(scoring);
+    const auto req = planner_request(140);
+
+    // A node whose telemetry has seen the load but whose residency list has
+    // not: free VRAM is gone, models_resident is empty.
+    rf::NodeState node = make_cluster()[0];
+    node.models_resident.clear();
+    node.vram_free_bytes = 500ULL * 1000 * 1000;   // the model is in there
+    node.sampled_at_ms = rf::now_ms() - 1000;
+
+    struct JustServed : rf::EmptyLedger {
+        int64_t when = 0;
+        int64_t last_served_ms(const std::string&, const std::string&) const override {
+            return when;
+        }
+    };
+
+    const int64_t now = rf::now_ms();
+
+    JustServed stale;
+    stale.when = now - scoring.node_stale_ms - 1000;   // beyond the horizon
+    const rf::AdmissionResult refused =
+        rf::admit(req, node, stale, *cost, scoring, now, {});
+    check(!refused.admitted && refused.reason == rf::AdmitReason::InsufficientVram,
+          "a completion older than the staleness horizon does not override VRAM");
+
+    JustServed fresh;
+    fresh.when = now - 100;                            // just served
+    const rf::AdmissionResult admitted =
+        rf::admit(req, node, fresh, *cost, scoring, now, {});
+    check(admitted.admitted,
+          "having just served it here is first-hand evidence of residency");
+
+    // Never served at all is the ordinary cold case and must stay refused, or
+    // the rule would admit every node that happens to be full.
+    JustServed never;
+    const rf::AdmissionResult cold =
+        rf::admit(req, node, never, *cost, scoring, now, {});
+    check(!cold.admitted,
+          "a node we have never served this model on is still judged on VRAM");
+}
+
 void test_warmth_beats_idle_power() {
     section("warm weak node vs idle strong node (§1)");
 
@@ -683,6 +734,7 @@ int main() {
     rf::log_set_level(rf::LogLevel::Error);
 
     test_admission();
+    test_admission_trusts_its_own_completion();
     test_warmth_beats_idle_power();
     test_ledger_prevents_duplicate_loads();
     test_queue_and_contention();
