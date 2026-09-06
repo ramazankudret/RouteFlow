@@ -724,10 +724,25 @@ the model. What stayed a guess was the case admission actually turns on: what a
 load will cost on a node that does **not** hold it, while another node does.
 That guess was `disk_bytes × 1.08 + kv(num_ctx)`.
 
-Against this project's own card the guess is 9.6% high — 5.204 GB predicted
-against 4.748 GB actually resident, for a model whose disk size is 4.683 GB.
-On an 8 GB card that is **456 MB of admission headroom refused per model**,
-which is the difference between two models fitting and one.
+Measured on the card itself — an RTX 4060 Laptop, 8188 MiB, running
+`qwen2.5:7b-instruct-q4_K_M` under Ollama:
+
+```
+disk size          4.683 GB
+size_vram          4.924 GB     ratio 1.0515, fully on the GPU
+seeded predict     5.204 GB     disk x 1.08 + kv(4096)
+seed error           +5.7 %     +280 MB
+```
+
+**This corrects the figure this decision was first written with.** It quoted a
+ratio of 1.014 and a 456 MB error, taken from a measurement recorded earlier in
+the project under a different Ollama build. Re-measured on the live card the
+ratio is 1.0515 and the error is 280 MB — the seed still overshoots, but by
+about half as much as claimed. The direction is what the decision rests on and
+that is unchanged; the magnitude was restated rather than left standing.
+
+280 MB per model on an 8 GB card is still worth having: it is the difference
+between two models fitting and one, in the cases that sit near the boundary.
 
 The engine reports the real number, so the overhead over disk size is learned
 from any node that holds the model and applied to nodes that do not. It is
@@ -743,7 +758,9 @@ Two guards, both in the direction that matters:
 - A ratio below 1.0 or above 4.0 is dropped rather than averaged. Below one is
   not a resident copy of these weights — a partial offload, or a name shared
   with a different quantisation — and averaging it would quietly shrink every
-  later estimate.
+  later estimate. `tests/policy_test.cpp` covers this; the attempt to also
+  demonstrate it on real hardware, by loading a 9.6 GB model onto the 8 GB card,
+  took Docker's Linux engine down with it and was not repeated.
 
 Harvesting happens in `estimate()`, which walks every candidate node anyway.
 That method is `const` because scoring must not change a decision; recording an

@@ -100,10 +100,11 @@ public:
         // The engine reports resident VRAM per model, so the overhead over disk
         // size is observable rather than assumed. It is learned as a ratio
         // because a ratio transfers between nodes and an absolute does not: the
-        // weights are the same bytes on any GPU. Measured on this project's own
-        // card the ratio is 1.014, against a seeded 1.08 plus a KV term -- the
-        // seed overshoots by 9.6%, which is 456 MB of admission headroom
-        // refused per model on an 8 GB card (D35).
+        // weights are the same bytes on any GPU. Measured on the card itself:
+        // qwen2.5:7b-q4_K_M is 4.683 GB on disk and 4.924 GB resident, a ratio
+        // of 1.0515, against a seed that predicts 5.204 GB. The seed overshoots
+        // by 5.7% -- 280 MB of admission headroom refused per model on an 8 GB
+        // card (D35).
         if (node.resident_bytes(model) > 0) {
             return seed_footprint_bytes(model, node, num_ctx, scoring_);
         }
