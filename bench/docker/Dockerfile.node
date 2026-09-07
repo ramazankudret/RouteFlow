@@ -1,0 +1,21 @@
+# A RouteFlow node: the engine on loopback, the agent as the only exposed port.
+#
+# That is D18's topology, and until this image existed it had only ever run over
+# 127.0.0.1 -- where a connection either succeeds at once or is refused at once.
+# The router's whole failure layer (NodeStale, poll_failures, retry elsewhere,
+# "once a byte reached the client there is no retry") had never seen a timeout,
+# a partition, or a slow link.
+#
+# iproute2 is here for `tc netem`, so a link can be given real latency and real
+# loss. curl is for readiness, because a container that answers is the only
+# honest definition of "up".
+FROM ollama/ollama:latest
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends iproute2 curl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY node-entrypoint.sh /usr/local/bin/node-entrypoint.sh
+RUN chmod +x /usr/local/bin/node-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/node-entrypoint.sh"]

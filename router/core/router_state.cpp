@@ -29,19 +29,20 @@ Reservation RouterState::reserve_locked(const RequestFeatures& req,
     excluded.insert(excluded.end(), skip.begin(), skip.end());
 
     // The policy applies the shared admission filters and the shared cost
-    // model; all it decides is which admitted candidate wins.
-    r.decision = policy_->select(req, nodes, ledger_, *cost_, scoring_);
-
-    // Excluded nodes must still appear in the breakdown — a node that
-    // influenced routing without showing up in the Decision is a bug (§10) and
-    // that includes being excluded from it.
-    for (auto& c : r.decision.candidates) {
-        if (std::find(excluded.begin(), excluded.end(), c.node_id) == excluded.end())
-            continue;
-        if (c.node_id == r.decision.winner_node_id) continue;
-        c.admitted = false;
-        c.reason = AdmitReason::Excluded;
-    }
+    // model; all it decides is which admitted candidate wins. The exclusion
+    // goes in here, so admission rejects those nodes and they appear in the
+    // breakdown as rejected-with-a-reason (§10).
+    //
+    // It used to be applied afterwards, by walking the finished candidate list
+    // and marking excluded nodes rejected -- with `if (node == winner)
+    // continue;`, because marking the winner rejected would have left a
+    // Decision with no usable winner. So whenever an excluded node was the best
+    // one, the exclusion did nothing at all. That defeated the operator's
+    // `excluded` flag silently, and it defeated D9's retry: a request whose
+    // node had just failed was retried onto the same node, twice, and returned
+    // 502 while a healthy node sat admitted beside it. A real network found it;
+    // loopback never could, because the engine and the agent die together there.
+    r.decision = policy_->select(req, nodes, ledger_, *cost_, scoring_, excluded);
 
     const Candidate* winner = r.decision.winner();
     if (!winner) {

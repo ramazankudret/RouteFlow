@@ -129,6 +129,7 @@ python3 bench/predictive_ceiling.py "bench/results-*/lru-run*.jsonl"
 | `docs/REAL-HARDWARE-RESULTS.md` | the estimator on an actual GPU |
 | `docs/REAL-TWO-NODE-RESULTS.md` | Warmth against RoundRobin on two real engines, GPU and CPU |
 | `docs/TTFT-DECISION.md` | why the TTFT regression is not fixed, measured against the alternative |
+| `docs/CLUSTER-RESULTS.md` | the cluster on a real network, and what happens when a node leaves it |
 
 ## What is not claimed
 
@@ -167,9 +168,11 @@ rather than built. One published result was retracted outright, and one headline
 figure was cut in half by a later fix — both are still on the page, next to what
 replaced them.
 
-Real hardware found six defects that five simulated campaigns could not: a 503
+Real hardware found seven defects that five simulated campaigns could not: a 503
 after a load, learning that was inert against a real engine, a preload that was
 really a swap, an uncertainty band covering 7-14% of outcomes where it claimed
 68%, every guard in the benchmark harness reporting success while it printed its
-refusal, and a benchmark that threw away what its own agents had learned ten
-times over. `docs/DECISIONS.md` D36 through D41.
+refusal, a benchmark that threw away what its own agents had learned ten times
+over, and — once the nodes were put behind a real network — a retry that went
+back to the node that had just failed, because an exclusion list was built and
+never handed over. `docs/DECISIONS.md` D36 through D42.

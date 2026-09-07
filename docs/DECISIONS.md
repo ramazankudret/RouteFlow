@@ -1120,3 +1120,44 @@ put RoundRobin's median at 48.81 s in one campaign and 56.57 s in the next, a
 16% swing in a baseline whose routing depends on none of this. The direction and
 the pairwise result have held every time; the margin should be read as roughly a
 quarter, not as 25.6%.
+
+### D42 — An exclusion that skipped the winner excluded nothing · Settled
+
+Found by the first fault test ever run against a node that was up and unusable.
+
+`reserve_locked` assembled the exclusion list — the operator's own excluded
+nodes (§6.1) plus the nodes this request had already failed on (§6.4, D9) — and
+then **never passed it to the policy**. It applied it afterwards, walking the
+finished candidate list and marking excluded nodes rejected, with
+`if (node == winner) continue;`, because marking the winner rejected would have
+left a Decision with no usable winner.
+
+So the exclusion did nothing **exactly when an excluded node was the best one**,
+which is the only case it exists for. Two consequences, both silent:
+
+- D9's retry sent the request back to the node that had just failed. Measured:
+  three requests, two attempts each, both on the same dead engine, three 502s,
+  with a healthy node admitted beside it.
+- `--exclude` on a node did nothing for as long as that node kept winning.
+
+The fix is to hand the list to `IPolicy::select` so admission rejects those
+nodes with a reason (§10), and delete the patch-up. Admission already had the
+machinery: `admit()` takes an exclusion list and returns `AdmitReason::Excluded`.
+Nobody had ever given it one.
+
+**Why nothing caught it.** On loopback an engine and its agent die together, so
+a failed node is an unhealthy node and loses on admission before the exclusion
+is ever consulted. Reaching this needs a node that is *up and unusable*, which
+needs the engine and the agent to be separable, which needs them behind a real
+network. `bench/real_cluster.sh` is what made it reachable.
+
+**And the unit test does not cover it.** A test now pins the policy contract —
+an excluded node that would have won does not win, shows up rejected with its
+reason, and excluding everything yields no winner. Reverting the fix leaves all
+108 checks green anyway, because the test calls `select` directly and the defect
+was that nobody called it with the list. The regression test is fault 5:
+reverting turns it red with `RETRIES total=3 moved=0 same_node=3`. Some defects
+live between two correct components, and only an integration test sees them.
+
+Full write-up, including the four other faults and the second cluster shape, in
+`docs/CLUSTER-RESULTS.md`.

@@ -60,13 +60,40 @@ this trade serves: not the batch, not the individual.
 **Decision: do not build it.** No `ttft_weight`, no interactive policy. Closed
 as measured-and-declined, the way Phase 4 was.
 
+## The other cluster shape, measured
+
+The paragraph that used to sit here said this finding depends on the warm node
+being the *slow* one, that on comparable nodes the trade might be free rather
+than bad, and that the substitute could not test it. Two engines on the same
+card can: 305.2 against 303.8 tok/s, a ratio of 1.008
+(`bench/real_cluster.sh ratio gpu`). Three models across two nodes, because with
+two of each a warmth-aware router just gives every model a node and there is no
+warmth question left.
+
+| | warm node 8-20× slower | warm node comparable |
+| --- | ---: | ---: |
+| objectives disagree | 33 of 80 (41%) | **2 of 30 (7%)** |
+| ttft saved where they differ (p50) | 947 ms | **0 ms** |
+| cost of min-ttft, total time | +61% | **+1%** |
+| ttft p50 under min-ttft | unchanged | unchanged |
+
+**The guess was wrong in an instructive direction.** The trade is not free on
+comparable nodes; it very nearly does not exist. The two objectives already
+agree on 93% of requests, and on the handful where they differ, minimising TTFT
+buys **zero milliseconds** at the median while costing time.
+
+So the decision holds in both regimes, for opposite reasons: where the warm node
+is much slower the trade is real and bad, and where it is comparable there is
+almost nothing to trade. A `ttft_weight` would be harmful in one and pointless
+in the other.
+
 ## What this does not show
 
-- **One cluster shape.** The finding depends on the warm node being the *slow*
-  one. On two comparable GPUs the warm node is not slower, so routing to it
-  would deliver the first token sooner and the last one no later — and the
-  trade would be free rather than bad. This substitute cannot test that, and it
-  is the case where a TTFT-aware objective might genuinely pay.
+- **The comparable pair shares one card.** Two engines on 8 GB and one SM array
+  contend in a way two machines would not, and the estimator is noticeably worse
+  there — predicted ttft p50 603 ms against 1,746 measured. The disagreement
+  *rate* is a property of the ranking and survives that; the millisecond figures
+  in the table above should be read as the model's opinion, not the clock's.
 - **These are the model's estimates**, not clock readings for roads not taken.
   They are worth something here because the model's residency belief now agrees
   with the engine on all 80 requests, and it prices a load within 300 ms of the
@@ -80,5 +107,10 @@ as measured-and-declined, the way Phase 4 was.
 ## Reproduce
 
 ```bash
+# the original cluster: a GPU and a CPU engine
 python3 bench/ttft_frontier.py "real 2-node" 'bench/results-real-two-node/warmth-v1-run*.jsonl'
+
+# two comparable nodes, three models
+bench/real_cluster.sh ratio gpu
+bench/real_cluster.sh ratio-campaign 10
 ```

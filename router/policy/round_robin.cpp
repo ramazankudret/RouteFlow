@@ -26,11 +26,12 @@ public:
 
     Decision select(const RequestFeatures& req, const std::vector<NodeState>& nodes,
                     const LedgerView& ledger, const ICostModel& cost,
-                    const ScoringConfig& scoring) const override {
+                    const ScoringConfig& scoring,
+                    const std::vector<std::string>& excluded) const override {
         Decision d;
         d.policy_name = name();
         d.candidates =
-            build_candidates(req, nodes, ledger, cost, scoring, now_ms(), excluded_);
+            build_candidates(req, nodes, ledger, cost, scoring, now_ms(), excluded);
 
         // Rotate over the admitted subset. `nodes` arrives in registry order,
         // which is the config order and therefore stable across runs — the
@@ -60,7 +61,6 @@ private:
     static constexpr size_t decision_npos = static_cast<size_t>(-1);
 
     mutable std::atomic<size_t> cursor_{0};
-    std::vector<std::string> excluded_;
 };
 
 }  // namespace

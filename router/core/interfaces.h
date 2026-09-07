@@ -159,10 +159,18 @@ public:
     // Called under a shared lock. Returns a Decision whose candidate list
     // covers every node, admitted or not: a node that influenced routing
     // without appearing here is a bug (§10).
+    //
+    // `excluded` is not advisory. It carries operator exclusions (§6.1) and the
+    // nodes this request has already failed on (§6.4, D9), and it must reach
+    // admission, which is the only place that can turn a node into a rejected
+    // candidate with a reason. Applying it after the fact does not work: the
+    // excluded node can win first, and then there is a winner nobody is allowed
+    // to use.
     virtual Decision select(const RequestFeatures& req,
                             const std::vector<NodeState>& nodes,
                             const LedgerView& ledger, const ICostModel& cost,
-                            const ScoringConfig& scoring) const = 0;
+                            const ScoringConfig& scoring,
+                            const std::vector<std::string>& excluded) const = 0;
 };
 
 std::unique_ptr<IPolicy> make_round_robin_policy();

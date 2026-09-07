@@ -29,3 +29,4 @@ bench/results-real-learning/
 bench/results-real-two-node/
 bench/results-real-placement-b2b/
 bench/results-real-placement-think/
+bench/results-real-cluster/

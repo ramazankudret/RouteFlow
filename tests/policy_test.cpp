@@ -517,6 +517,56 @@ void test_residency_limit() {
           "not charged for");
 }
 
+// Exclusion has to survive being right (D42). The list carries two things the
+// router cannot afford to get wrong: the operator's own "do not use this node"
+// (§6.1) and the nodes a request has already failed on (§6.4, D9). Both were
+// applied after selection, and skipped whenever the excluded node had won --
+// which is exactly when they matter.
+void test_exclusion_binds_even_when_the_node_would_win() {
+    section("an excluded node stays excluded when it is the best one (D42)");
+
+    const rf::ScoringConfig scoring = bench_scoring();
+    auto cost = rf::make_static_cost_model(scoring);
+    auto warmth = rf::make_warmth_policy();
+    auto rr = rf::make_round_robin_policy();
+    rf::EmptyLedger ledger;
+    const auto cluster = make_cluster();
+    const auto req = planner_request(140);
+
+    // sim-jetson holds planner:12b warm, so it wins on merit.
+    const rf::Decision open =
+        warmth->select(req, cluster, ledger, *cost, scoring, {});
+    check(open.winner_node_id == "sim-jetson",
+          "the warm node wins when nothing is excluded");
+
+    const rf::Decision closed =
+        warmth->select(req, cluster, ledger, *cost, scoring, {"sim-jetson"});
+    check(closed.winner_node_id != "sim-jetson",
+          "and loses when it is excluded, rather than winning anyway");
+    check(!closed.winner_node_id.empty(),
+          "the request still goes somewhere: exclusion narrows the field, it "
+          "does not empty it");
+
+    const rf::Candidate* c = find(closed, "sim-jetson");
+    check(c && !c->admitted && c->reason == rf::AdmitReason::Excluded,
+          "and it appears in the breakdown as rejected, with the reason (§10)");
+
+    // The same for round robin, because admission is shared and a baseline that
+    // ignores exclusions is not comparable to a policy that honours them.
+    const rf::Decision rr_closed =
+        rr->select(req, cluster, ledger, *cost, scoring, {"sim-jetson"});
+    check(rr_closed.winner_node_id != "sim-jetson",
+          "round robin honours it too, or the two arms are not filtered alike");
+
+    // Exclude everything and the answer is "nowhere", not "the excluded one".
+    const rf::Decision none =
+        warmth->select(req, cluster, ledger, *cost, scoring,
+                       {"sim-desktop", "sim-jetson", "sim-laptop"});
+    check(none.winner_node_id.empty(),
+          "excluding every node leaves no winner, rather than quietly picking "
+          "one of them");
+}
+
 void test_warmth_beats_idle_power() {
     section("warm weak node vs idle strong node (§1)");
 
@@ -530,7 +580,7 @@ void test_warmth_beats_idle_power() {
     // though it decodes at roughly twice the speed. This is the thesis.
     {
         const rf::Decision d =
-            warmth->select(planner_request(40), cluster, ledger, *cost, scoring);
+            warmth->select(planner_request(40), cluster, ledger, *cost, scoring, {});
         check_eq(d.winner_node_id, "sim-jetson",
                  "short reply: the warm Jetson beats the idle desktop");
         check_eq(d.decided_by, "t_load",
@@ -554,7 +604,7 @@ void test_warmth_beats_idle_power() {
     // the right answer. A policy that always chose warmth would get this wrong.
     {
         const rf::Decision d =
-            warmth->select(planner_request(1200), cluster, ledger, *cost, scoring);
+            warmth->select(planner_request(1200), cluster, ledger, *cost, scoring, {});
         check_eq(d.winner_node_id, "sim-desktop",
                  "long reply: loading on the fast node beats staying warm on the slow one");
     }
@@ -566,7 +616,7 @@ void test_warmth_beats_idle_power() {
     // would be claiming a precision it does not have (D8).
     {
         const rf::Decision d =
-            warmth->select(planner_request(140), cluster, ledger, *cost, scoring);
+            warmth->select(planner_request(140), cluster, ledger, *cost, scoring, {});
         check_eq(d.decided_by, "within_noise",
                  "mid-length reply: the margin is inside sigma and is reported as noise");
         check(!d.winner_node_id.empty(),
@@ -595,7 +645,7 @@ void test_ledger_prevents_duplicate_loads() {
     const std::vector<rf::NodeState> pair = {a, b};
 
     const auto req = planner_request(140);
-    const rf::Decision first = warmth->select(req, pair, ledger, *cost, scoring);
+    const rf::Decision first = warmth->select(req, pair, ledger, *cost, scoring, {});
     check(!first.winner_node_id.empty(), "the first request picks a node");
 
     const rf::Candidate* winner = first.winner();
@@ -616,7 +666,7 @@ void test_ledger_prevents_duplicate_loads() {
     // faster for the client than queueing behind one load and one generation.
     // What the ledger guarantees is that the choice is *priced*, not that it is
     // always made one way (see D21).
-    const rf::Decision second = warmth->select(req, pair, ledger, *cost, scoring);
+    const rf::Decision second = warmth->select(req, pair, ledger, *cost, scoring, {});
     const rf::Candidate* same = find(second, first.winner_node_id);
     const rf::Candidate* other =
         find(second, first.winner_node_id == "a" ? "b" : "a");
@@ -632,7 +682,7 @@ void test_ledger_prevents_duplicate_loads() {
     const double eta = winner->est.t_load_ms;
     aged.reserve(first.winner_node_id, req.model, footprint, true, eta,
                  rf::now_ms() - static_cast<int64_t>(eta * 0.8));
-    const rf::Decision late = warmth->select(req, pair, aged, *cost, scoring);
+    const rf::Decision late = warmth->select(req, pair, aged, *cost, scoring, {});
     const rf::Candidate* nearly_loaded = find(late, first.winner_node_id);
     const rf::Candidate* fresh = find(late, first.winner_node_id == "a" ? "b" : "a");
     check(nearly_loaded && fresh &&
@@ -717,7 +767,7 @@ void test_uncertainty_and_omission() {
     req.predicted_output_tokens = 60;
     req.predicted_output_sigma = 21.f;
 
-    const rf::Decision d = warmth->select(req, {a, b}, ledger, *cost, scoring);
+    const rf::Decision d = warmth->select(req, {a, b}, ledger, *cost, scoring, {});
     check(!d.winner_node_id.empty(), "a winner is still chosen");
     check_eq(d.decided_by, "within_noise",
              "but a margin inside sigma is reported as noise, not as a decision");
@@ -728,7 +778,7 @@ void test_uncertainty_and_omission() {
     opaque.id = "opaque";
     opaque.residency_known = false;
     opaque.models_resident.clear();
-    const rf::Decision blind = warmth->select(req, {opaque}, ledger, *cost, scoring);
+    const rf::Decision blind = warmth->select(req, {opaque}, ledger, *cost, scoring, {});
     const rf::Candidate* c = find(blind, "opaque");
     check(c && (c->est.omitted_terms & rf::kTermLoad),
           "an engine with unknown residency omits t_load rather than assuming cold");
@@ -751,7 +801,7 @@ void test_round_robin_is_a_baseline() {
 
     std::vector<std::string> picks;
     for (int i = 0; i < 6; ++i)
-        picks.push_back(rr->select(req, cluster, ledger, *cost, scoring).winner_node_id);
+        picks.push_back(rr->select(req, cluster, ledger, *cost, scoring, {}).winner_node_id);
 
     bool rotated = false;
     for (size_t i = 1; i < picks.size(); ++i)
@@ -760,7 +810,7 @@ void test_round_robin_is_a_baseline() {
     for (const auto& p : picks)
         check(p != "sim-laptop", "it never picks an inadmissible node");
 
-    const rf::Decision d = rr->select(req, cluster, ledger, *cost, scoring);
+    const rf::Decision d = rr->select(req, cluster, ledger, *cost, scoring, {});
     check_eq(d.decided_by, "round_robin",
              "and it says it did not consult a term, rather than claiming one");
     const rf::Candidate* jetson = find(d, "sim-jetson");
@@ -1096,6 +1146,7 @@ int main() {
     test_admission();
     test_admission_trusts_its_own_completion();
     test_residency_limit();
+    test_exclusion_binds_even_when_the_node_would_win();
     test_warmth_beats_idle_power();
     test_ledger_prevents_duplicate_loads();
     test_queue_and_contention();
