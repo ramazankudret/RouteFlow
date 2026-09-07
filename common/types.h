@@ -27,6 +27,11 @@ struct ResidentModel {
     std::string name;
     uint64_t vram_bytes = 0;
     int64_t last_used_ms = 0;  // epoch ms; 0 = never observed by us
+    // When the engine says it will drop this model of its own accord; 0 if it
+    // does not say. Worth carrying because a model that disappears *before*
+    // this was not idle-expired, it was displaced -- which is how the agent
+    // works out how many models the engine will hold (D38).
+    int64_t expires_at_ms = 0;
 };
 
 struct NodeState {
@@ -45,6 +50,13 @@ struct NodeState {
     EngineKind engine = EngineKind::None;
     bool engine_healthy = false;
     uint32_t engine_slots = 1;  // parallel requests the engine accepts
+    // How many models the engine will keep resident, once it has demonstrated
+    // a ceiling; 0 while unknown. Not the same question as engine_slots, and
+    // the router got it wrong for want of asking: with room for two models and
+    // an engine that holds one, every preload is a swap and placement moves
+    // cold starts instead of removing them (D38). Engines do not report this,
+    // so the agent watches for it (agent/engine/residency_limit.h).
+    uint32_t models_resident_limit = 0;
     // Some engines do not expose which models are in VRAM. Treating "unknown"
     // as "cold" would silently invent the one number this project exists to
     // measure, so the flag travels with the state and omits T_load instead.
@@ -197,6 +209,14 @@ public:
     // is first-hand and can be newer than the most recent poll.
     virtual int64_t last_served_ms(const std::string& node_id,
                                    const std::string& model) const = 0;
+    // How many *other* models this node has served since `since_ms`. On an
+    // engine with a demonstrated residency ceiling that count is what says
+    // whether a model we served recently can still be there: serve the ceiling
+    // in others and ours has been pushed out, however recent our own turn was
+    // (D38).
+    virtual uint32_t models_served_since(const std::string& node_id,
+                                         const std::string& except_model,
+                                         int64_t since_ms) const = 0;
 };
 
 // A LedgerView that reports an idle cluster. Used by tests and by the bench
@@ -213,6 +233,10 @@ public:
         return false;
     }
     int64_t last_served_ms(const std::string&, const std::string&) const override {
+        return 0;
+    }
+    uint32_t models_served_since(const std::string&, const std::string&,
+                                 int64_t) const override {
         return 0;
     }
 };

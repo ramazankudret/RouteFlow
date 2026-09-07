@@ -63,40 +63,70 @@ AdmissionResult admit(const RequestFeatures& req, const NodeState& node,
     const uint64_t free_effective =
         node.vram_free_bytes > reserved ? node.vram_free_bytes - reserved : 0;
 
-    if (free_effective >= out.footprint_bytes) {
+    // Two ways a node can have no room, and for a long time this only knew
+    // about one. An engine holding as many models as it will keep is full in
+    // the currency it actually counts in, however many free bytes the card
+    // reports -- so loading here evicts something whether we plan for it or
+    // not, and an unplanned eviction is one T_evict never prices and the trace
+    // never records (D38).
+    const bool crowded = at_residency_limit(node, req.model);
+    if (free_effective >= out.footprint_bytes && !crowded) {
         out.admitted = true;
         return out;
     }
 
-    // Not enough free VRAM. Rev 1 stopped here and rejected the node; that
-    // wrongly eliminates any machine holding an idle model it could drop (D7).
-    // Evict least-recently-used first, skipping models this router is currently
+    // Rev 1 stopped here and rejected the node; that wrongly eliminates any
+    // machine holding an idle model it could drop (D7). Evict
+    // least-recently-used first, skipping models this router is currently
     // generating with.
-    std::vector<const ResidentModel*> evictable;
+    //
+    // Ollama does not say when a model was last used, only when it expires, so
+    // `last_used_ms` arrives as 0 from every real engine -- which made the sort
+    // below arbitrary and `evicts_warm` permanently false. T_evict was
+    // therefore zero on every real decision this project has ever measured: the
+    // externality D7 exists to price was live in simulation and dead on
+    // hardware. The router does know the answer, because it knows what it
+    // dispatched, so it fills it in from the ledger (D38).
+    struct Evictable {
+        const ResidentModel* model;
+        int64_t last_used_ms;
+    };
+    std::vector<Evictable> evictable;
     for (const auto& m : node.models_resident) {
         if (m.name == req.model) continue;
         if (ledger.model_busy(node.id, m.name)) continue;
-        evictable.push_back(&m);
+        const int64_t used = m.last_used_ms > 0 ? m.last_used_ms
+                                                : ledger.last_served_ms(node.id, m.name);
+        evictable.push_back({&m, used});
     }
     std::sort(evictable.begin(), evictable.end(),
-              [](const ResidentModel* a, const ResidentModel* b) {
-                  return a->last_used_ms < b->last_used_ms;
+              [](const Evictable& a, const Evictable& b) {
+                  return a.last_used_ms < b.last_used_ms;
               });
 
+    // Crowding is satisfied by dropping one model; a byte shortfall is
+    // satisfied by dropping enough of them. Both can apply at once, so the
+    // loop runs until neither does.
     uint64_t reclaimed = free_effective;
-    for (const ResidentModel* m : evictable) {
-        if (reclaimed >= out.footprint_bytes) break;
-        reclaimed += m->vram_bytes;
-        out.would_evict.push_back(m->name);
-        out.evict_bytes += m->vram_bytes;
-        if (m->last_used_ms > 0 && now_ms - m->last_used_ms <= scoring.warm_window_ms)
+    size_t resident_after = node.models_resident.size();
+    const size_t room_for =
+        node.models_resident_limit > 0 ? node.models_resident_limit - 1 : resident_after;
+    for (const Evictable& v : evictable) {
+        if (reclaimed >= out.footprint_bytes && resident_after <= room_for) break;
+        reclaimed += v.model->vram_bytes;
+        --resident_after;
+        out.would_evict.push_back(v.model->name);
+        out.evict_bytes += v.model->vram_bytes;
+        if (v.last_used_ms > 0 && now_ms - v.last_used_ms <= scoring.warm_window_ms)
             out.evicts_warm = true;
     }
 
-    if (reclaimed < out.footprint_bytes) {
+    if (reclaimed < out.footprint_bytes || resident_after > room_for) {
         out.would_evict.clear();
         out.evict_bytes = 0;
         out.evicts_warm = false;
+        // Every candidate resident model is busy serving this router, so the
+        // engine has nothing it can drop for us right now.
         return reject(AdmitReason::InsufficientVram);
     }
 

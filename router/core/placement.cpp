@@ -177,7 +177,15 @@ void PlacementManager::consider(const NodeState& node) {
     // claim Phase 3 is testing: that frequency is a better eviction signal than
     // the engine's recency. The margin keeps it from thrashing on near-ties,
     // where swapping costs a load and buys nothing.
-    if (node.vram_free_bytes < footprint) {
+    //
+    // "Room" is not only bytes. An engine that keeps a fixed number of models
+    // is full at that number, and the preload becomes a swap the manager never
+    // asked for -- measured on real hardware as six or seven preloads a run,
+    // zero evictions counted, and cold starts moved from one model to the other
+    // rather than removed (D38). Making the same test cover both cases puts
+    // that swap back under the margin rule below, where it can be declined.
+    const bool crowded = at_residency_limit(node, target->model);
+    if (node.vram_free_bytes < footprint || crowded) {
         struct Victim {
             const ResidentModel* model;
             uint32_t demand;
@@ -195,9 +203,13 @@ void PlacementManager::consider(const NodeState& node) {
                   [](const Victim& a, const Victim& b) { return a.demand < b.demand; });
 
         uint64_t freed = node.vram_free_bytes;
+        size_t resident_after = node.models_resident.size();
+        const size_t room_for = node.models_resident_limit > 0
+                                    ? node.models_resident_limit - 1
+                                    : resident_after;
         std::vector<const ResidentModel*> chosen;
         for (const Victim& v : victims) {
-            if (freed >= footprint) break;
+            if (freed >= footprint && resident_after <= room_for) break;
             // Only displace something the arrival clearly beats. Without this a
             // pair of equally-wanted models would swap places forever, each
             // eviction paying a load for no gain.
@@ -207,8 +219,18 @@ void PlacementManager::consider(const NodeState& node) {
             }
             chosen.push_back(v.model);
             freed += v.model->vram_bytes;
+            --resident_after;
         }
-        if (freed < footprint) return;  // nothing here is wanted less than this
+        // Nothing here is wanted enough less than the arrival to justify the
+        // swap. On a crowded engine that is the common answer, and declining is
+        // the whole point: a preload that costs a warm model its place is not
+        // a preload.
+        if (freed < footprint || resident_after > room_for) {
+            RF_DEBUG("placement %s: %s wanted %u, but nothing resident is wanted "
+                     "enough less to displace",
+                     node.id.c_str(), target->model.c_str(), target->count);
+            return;
+        }
 
         for (const ResidentModel* victim : chosen) {
             std::string err;

@@ -18,6 +18,7 @@
 
 #include "common/types.h"
 #include "common/util.h"
+#include "agent/engine/residency_limit.h"
 #include "router/core/admission.h"
 #include "router/core/interfaces.h"
 #include "router/core/ledger.h"
@@ -242,6 +243,278 @@ void test_admission_trusts_its_own_completion() {
         rf::admit(req, node, never, *cost, scoring, now, {});
     check(!cold.admitted,
           "a node we have never served this model on is still judged on VRAM");
+}
+
+// An engine that keeps a fixed number of models resident (D38). None report
+// the setting, so the agent infers it and the router has to act on it in three
+// places: what it believes is loaded, what it plans to evict, and whether a
+// preload is a preload at all.
+void test_residency_limit() {
+    section("an engine's resident-model limit (D38)");
+
+    // --- the agent's inference ------------------------------------------
+    //
+    // Driven with the transitions a real Ollama actually produces, measured at
+    // 2 Hz: it drops first and loads second, so the resident set is empty in
+    // between. An earlier version of this looked for a gain and a loss in the
+    // same poll and would never have fired once.
+    {
+        const int64_t t0 = 1000000;
+        const uint64_t roomy = 7ULL * 1000 * 1000 * 1000;
+        rf::ResidencyLimit lim;
+
+        auto poll = [&lim](std::vector<std::pair<std::string, int64_t>> models,
+                           uint64_t free, int64_t at) {
+            std::vector<rf::ResidentModel> r;
+            for (const auto& nm : models) {
+                rf::ResidentModel m;
+                m.name = nm.first;
+                m.vram_bytes = 400ULL * 1000 * 1000;
+                m.expires_at_ms = nm.second;
+                r.push_back(m);
+            }
+            return lim.observe(r, true, free, at);
+        };
+
+        // A holds the engine, expiring five minutes out. Then nothing. Then B.
+        poll({{"a", t0 + 300000}}, roomy, t0);
+        poll({}, roomy, t0 + 1000);                       // mid-swap
+        check(poll({{"b", t0 + 302000}}, roomy, t0 + 2000) == 0,
+              "one early drop is a coincidence until it repeats");
+        poll({}, roomy, t0 + 3000);
+        check(poll({{"a", t0 + 304000}}, roomy, t0 + 4000) == 1,
+              "a model dropped before its own expiry, twice, with room to "
+              "spare, is the engine showing its ceiling");
+
+        check(poll({{"a", t0 + 304000}, {"b", t0 + 305000}}, roomy, t0 + 5000) == 0,
+              "and seeing more models resident than that withdraws it");
+    }
+    {
+        // A model that simply timed out says nothing about capacity. Same
+        // shape, but each departure happens after its own expiry.
+        const int64_t t0 = 1000000;
+        rf::ResidencyLimit lim;
+        auto poll = [&lim](std::vector<std::pair<std::string, int64_t>> models,
+                           int64_t at) {
+            std::vector<rf::ResidentModel> r;
+            for (const auto& nm : models) {
+                rf::ResidentModel m;
+                m.name = nm.first;
+                m.vram_bytes = 400ULL * 1000 * 1000;
+                m.expires_at_ms = nm.second;
+                r.push_back(m);
+            }
+            return lim.observe(r, true, 7ULL * 1000 * 1000 * 1000, at);
+        };
+        poll({{"a", t0 + 500}}, t0);        // due to expire almost immediately
+        poll({}, t0 + 1000);
+        poll({{"b", t0 + 1500}}, t0 + 2000);
+        poll({}, t0 + 3000);
+        poll({{"a", t0 + 3500}}, t0 + 4000);
+        check(lim.value() == 0,
+              "a model that left after its expiry was idle, not displaced");
+    }
+    {
+        // Swapping because there was no room is ordinary VRAM pressure.
+        const int64_t t0 = 1000000;
+        rf::ResidencyLimit lim;
+        auto tight = [&lim](std::vector<std::string> names, int64_t at) {
+            std::vector<rf::ResidentModel> r;
+            for (const auto& n : names) {
+                rf::ResidentModel m;
+                m.name = n;
+                m.vram_bytes = 6ULL * 1000 * 1000 * 1000;
+                m.expires_at_ms = at + 300000;
+                r.push_back(m);
+            }
+            return lim.observe(r, true, 1ULL * 1000 * 1000 * 1000, at);
+        };
+        tight({"a"}, t0);
+        tight({}, t0 + 1000);
+        tight({"b"}, t0 + 2000);
+        tight({}, t0 + 3000);
+        tight({"a"}, t0 + 4000);
+        check(lim.value() == 0,
+              "a swap that memory pressure explains is not evidence of a "
+              "ceiling -- which is also why a simulated node, whose capacity "
+              "is its VRAM, can never invent one");
+    }
+    {
+        // Far enough apart and the two observations are not one event.
+        const int64_t t0 = 1000000;
+        rf::ResidencyLimit lim;
+        auto poll = [&lim](std::vector<std::pair<std::string, int64_t>> models,
+                           int64_t at) {
+            std::vector<rf::ResidentModel> r;
+            for (const auto& nm : models) {
+                rf::ResidentModel m;
+                m.name = nm.first;
+                m.vram_bytes = 400ULL * 1000 * 1000;
+                m.expires_at_ms = nm.second;
+                r.push_back(m);
+            }
+            return lim.observe(r, true, 7ULL * 1000 * 1000 * 1000, at);
+        };
+        poll({{"a", t0 + 300000}}, t0);
+        poll({{"b", t0 + 400000}}, t0 + 120000);
+        poll({{"a", t0 + 500000}}, t0 + 240000);
+        check(lim.value() == 0,
+              "two minutes apart, a departure and an arrival are not one swap");
+    }
+    {
+        rf::ResidencyLimit lim;
+        std::vector<rf::ResidentModel> none;
+        check(lim.observe(none, false, 0, 1000) == 0,
+              "an engine that will not say what is resident teaches nothing");
+    }
+    {
+        // An engine that reports no expiry is not saying it dropped anything
+        // early, so it is not saying anything at all.
+        const int64_t t0 = 1000000;
+        rf::ResidencyLimit lim;
+        auto poll = [&lim](std::vector<std::string> names, int64_t at) {
+            std::vector<rf::ResidentModel> r;
+            for (const auto& n : names) {
+                rf::ResidentModel m;
+                m.name = n;
+                m.vram_bytes = 400ULL * 1000 * 1000;
+                m.expires_at_ms = 0;   // engine does not say
+                r.push_back(m);
+            }
+            return lim.observe(r, true, 7ULL * 1000 * 1000 * 1000, at);
+        };
+        poll({"a"}, t0);
+        poll({}, t0 + 1000);
+        poll({"b"}, t0 + 2000);
+        poll({}, t0 + 3000);
+        poll({"a"}, t0 + 4000);
+        check(lim.value() == 0,
+              "without an expiry to compare against, an absence proves nothing");
+    }
+
+    // --- what the router believes is loaded ------------------------------
+    const rf::ScoringConfig scoring = bench_scoring();
+    auto cost = rf::make_static_cost_model(scoring);
+    const auto req = planner_request(140);
+    const int64_t now = rf::now_ms();
+
+    // The shape that produced 7 of 8 mispriced cold starts on real hardware:
+    // we served this model here seconds ago, so D36's rule says warm -- but the
+    // engine holds one model and has served another since.
+    rf::NodeState node = make_cluster()[0];
+    node.models_resident.clear();
+    add_resident(node, "worker:3b", 2 * kGB, now - 500);
+    node.vram_free_bytes = 6ULL * 1000 * 1000 * 1000;   // plenty
+    node.sampled_at_ms = now - 100;
+
+    struct Served : rf::EmptyLedger {
+        int64_t ours = 0;
+        uint32_t others = 0;
+        int64_t last_served_ms(const std::string&, const std::string&) const override {
+            return ours;
+        }
+        uint32_t models_served_since(const std::string&, const std::string&,
+                                     int64_t) const override {
+            return others;
+        }
+    };
+
+    Served just_us;
+    just_us.ours = now - 500;
+    just_us.others = 0;
+
+    node.models_resident_limit = 0;
+    check(rf::believed_loaded(node, req.model, just_us, scoring, now),
+          "with no known ceiling, a recent completion still means warm (D36)");
+
+    node.models_resident_limit = 1;
+    check(rf::believed_loaded(node, req.model, just_us, scoring, now),
+          "a ceiling alone does not withdraw that: nothing has displaced us yet");
+
+    Served displaced;
+    displaced.ours = now - 500;
+    displaced.others = 1;
+    check(!rf::believed_loaded(node, req.model, displaced, scoring, now),
+          "but once the engine has served its whole ceiling in other models, "
+          "ours cannot still be there");
+
+    // --- what admission plans to evict -----------------------------------
+    rf::NodeState roomy = make_cluster()[1];       // sim-jetson, holds planner
+    roomy.models_resident.clear();
+    add_resident(roomy, "worker:3b", 2 * kGB, now - 60000);
+    roomy.vram_free_bytes = 12ULL * 1000 * 1000 * 1000;  // room for both
+
+    rf::EmptyLedger idle;
+    roomy.models_resident_limit = 0;
+    const rf::AdmissionResult free_ride =
+        rf::admit(req, roomy, idle, *cost, scoring, now, {});
+    check(free_ride.admitted && free_ride.would_evict.empty(),
+          "with bytes to spare and no known ceiling, loading evicts nothing");
+
+    roomy.models_resident_limit = 1;
+    const rf::AdmissionResult swap =
+        rf::admit(req, roomy, idle, *cost, scoring, now, {});
+    check(swap.admitted, "a crowded engine can still take the request");
+    check(swap.would_evict.size() == 1 && swap.would_evict[0] == "worker:3b",
+          "but the displacement is planned and named, not discovered afterwards");
+    check(swap.evict_bytes > 0,
+          "so T_evict prices it like any other eviction (D7)");
+
+    // Nothing droppable: every resident model is busy serving this router.
+    struct AllBusy : rf::EmptyLedger {
+        bool model_busy(const std::string&, const std::string&) const override {
+            return true;
+        }
+    } busy;
+    const rf::AdmissionResult stuck =
+        rf::admit(req, roomy, busy, *cost, scoring, now, {});
+    check(!stuck.admitted && stuck.reason == rf::AdmitReason::InsufficientVram,
+          "and a full engine with nothing droppable is refused rather than "
+          "sent a request it would have to interrupt");
+
+    // --- pricing that eviction ------------------------------------------
+    //
+    // A real engine does not say when a model was last used, only when it
+    // expires, so `last_used_ms` arrives as 0 and `evicts_warm` was never true
+    // on hardware -- T_evict was live in simulation and dead in the field. The
+    // router knows the answer from its own dispatches.
+    // A node shaped the way a real Ollama reports one: resident, but with no
+    // last-use, because the engine only publishes an expiry.
+    rf::NodeState silent = roomy;
+    silent.models_resident.clear();
+    add_resident(silent, "worker:3b", 2 * kGB, 0);
+    silent.models_resident_limit = 1;
+
+    const rf::AdmissionResult unpriced =
+        rf::admit(req, silent, idle, *cost, scoring, now, {});
+    check(!unpriced.would_evict.empty(),
+          "the displacement is still planned when the engine reports no "
+          "last-use");
+    check(!unpriced.evicts_warm,
+          "but with nothing to date it by, it looks cold and T_evict stays "
+          "zero -- which is what every real decision measured so far did");
+
+    struct ServedVictim : rf::EmptyLedger {
+        int64_t when = 0;
+        int64_t last_served_ms(const std::string&, const std::string& model) const override {
+            return model == "worker:3b" ? when : 0;
+        }
+    };
+    ServedVictim recent;
+    recent.when = now - 5000;                       // inside warm_window
+    const rf::AdmissionResult warm_victim =
+        rf::admit(req, silent, recent, *cost, scoring, now, {});
+    check(warm_victim.evicts_warm,
+          "the router's own record of serving it there dates it, and T_evict "
+          "prices it (D7, D38)");
+
+    ServedVictim stale_victim;
+    stale_victim.when = now - scoring.warm_window_ms - 1000;
+    const rf::AdmissionResult cold_victim =
+        rf::admit(req, silent, stale_victim, *cost, scoring, now, {});
+    check(!cold_victim.evicts_warm,
+          "and a victim nobody has wanted for longer than the warm window is "
+          "not charged for");
 }
 
 void test_warmth_beats_idle_power() {
@@ -822,6 +1095,7 @@ int main() {
 
     test_admission();
     test_admission_trusts_its_own_completion();
+    test_residency_limit();
     test_warmth_beats_idle_power();
     test_ledger_prevents_duplicate_loads();
     test_queue_and_contention();

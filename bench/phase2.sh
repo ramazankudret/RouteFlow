@@ -53,7 +53,11 @@ mkdir -p "${OUT}"
 
 # The bracket keeps the pattern from matching this script's own command line.
 cleanup() { pkill -f '[r]outeflow-(agent|router)' 2>/dev/null || true; }
-trap cleanup EXIT
+# An EXIT trap that returns normally hands bash the trap's status, not the
+# script's, so every `exit N` below was reported to the caller as 0 -- the
+# refusal printed and the harness looked like it had passed. Re-exiting with
+# the saved status is the fix.
+trap 'rc=$?; cleanup; exit ${rc}' EXIT
 cleanup; sleep 1
 
 start_agents() {

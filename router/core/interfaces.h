@@ -89,12 +89,31 @@ struct ScoringConfig {
 // admission believes a node can serve without loading while the estimate prices
 // a full load, the router admits the warm node and then ranks it as if it were
 // cold (D36).
+// The exception is an engine that has shown it will only hold so many models
+// (D38). There, "we served it recently" stops being evidence the moment the
+// engine has served that many others since -- it cannot have kept ours. Without
+// this the router priced a load at zero on 7 of 8 real cold starts, because it
+// trusted its own memory over an engine that had quietly swapped underneath it.
 inline bool believed_loaded(const NodeState& node, const std::string& model,
                             const LedgerView& ledger, const ScoringConfig& scoring,
                             int64_t now_ms) {
     if (node.is_resident(model)) return true;
     const int64_t served = ledger.last_served_ms(node.id, model);
-    return served > 0 && now_ms - served <= scoring.node_stale_ms;
+    if (served <= 0 || now_ms - served > scoring.node_stale_ms) return false;
+    if (node.models_resident_limit > 0 &&
+        ledger.models_served_since(node.id, model, served) >=
+            node.models_resident_limit)
+        return false;
+    return true;
+}
+
+// Would loading `model` here displace something, even though there is room?
+// `engine_slots` never answered this and `vram_free_bytes` answers a different
+// question: an engine holding its maximum has no space in the only currency it
+// counts in (D38).
+inline bool at_residency_limit(const NodeState& node, const std::string& model) {
+    return node.models_resident_limit > 0 && !node.is_resident(model) &&
+           node.models_resident.size() >= node.models_resident_limit;
 }
 
 // What admission decided this request would have to evict on a given node.

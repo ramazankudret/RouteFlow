@@ -870,7 +870,7 @@ What this bought, on the card: `prompt_tokens_actual` arriving as 36 against an
 estimated 33 — D15's estimator running about 8% low on short prompts, which
 until now was unmeasurable outside simulation.
 
-### D38 — An engine's resident-model limit is missing from the node state · Open
+### D38 — An engine's resident-model limit is missing from the node state · Settled
 
 D34 said placement is conditional: inert on back-to-back traffic, worth having
 where the workload leaves gaps. Both halves were measured on simulated nodes.
@@ -898,21 +898,77 @@ so the router believes both fit. Ollama disagrees and has no way to say so.
 room for two, so a preload there genuinely added one. That is the whole
 difference between the simulated verdict and the hardware.
 
-Left open rather than fixed, because the fix is a design choice and this entry
-is the measurement:
-
-- Ollama does not expose `OLLAMA_MAX_LOADED_MODELS` over its API, so the agent
-  cannot simply report it.
-- It is inferable: a preload that consistently displaces another model on the
-  same node says the capacity is one. That is learnable the way everything else
-  here is learned, and it belongs to whichever phase needs it.
-- Until then the manager cannot distinguish "preload B" from "swap A for B",
-  and those have opposite value.
-
 One smaller lesson, recorded because it cost a campaign: the manager's
 `evictions` counter reads 0 throughout. It is accurate about what the manager
 did and silent about what happened, and a counter that only sees its own actions
 is not measuring the system.
+
+---
+
+**Closed.** Three separate defects, each hidden behind the last.
+
+**1. Nothing in the contract asked the question.** `NodeState` now carries
+`models_resident_limit`, and since no engine reports it, the agent watches for
+it (`agent/engine/residency_limit.h`).
+
+The first version of that watcher was wrong, and measuring corrected it. It
+looked for a poll where one model was lost and another gained together. At 2 Hz
+the engine actually does:
+
+    [qwen] -> [] -> [tinyllama]      one to five seconds with nothing resident
+
+It drops first and loads second, so a same-poll comparison could never have
+fired once. The evidence that works is three observations, because each has an
+innocent explanation alone: a model left **before its own `expires_at`**
+(measured: qwen went 4m51s before a five-minute expiry, the moment tinyllama was
+asked for); a different model arrived within a load's time; and there were
+already free bytes for it. The third is what separates a count limit from a
+memory limit — and it is the test a simulated node always fails, so the
+simulator cannot invent a ceiling it does not have. Two such observations and
+the limit is published; on the real GPU that takes two swaps.
+
+**2. The router trusted its own memory over the engine.** D36's "we served it
+recently, so it is warm" is wrong the moment the engine has served its whole
+ceiling in other models since. That is what priced `t_load` at zero on 7 of 8
+real cold starts. `believed_loaded()` now asks the ledger how many others have
+been served since; `t_load` went from non-zero on 39 of 80 decisions to 70 of 80.
+
+**3. And that exposed T_evict as dead on real hardware.** Ollama reports when a
+model expires, never when it was used, so `last_used_ms` arrived as 0 from every
+real engine: the LRU eviction order was arbitrary and `evicts_warm` was never
+true. **The externality D7 exists to price was live in simulation and dead in
+the field**, on every real decision this project has measured. The router does
+know the answer — it knows what it dispatched — so admission now dates the
+victim from the ledger.
+
+Skipping the third would have been worse than doing nothing. Three campaigns,
+same workload, LRU arm:
+
+| | cold starts / run | gpu / cpu requests |
+| --- | ---: | ---: |
+| before | 8 | 59 / 21 |
+| limit + belief only | **14** | 75 / 5 |
+| … and the eviction dated | **3** | 45 / 35 |
+
+The half-fix was right about each request and blind to what each one cost the
+next. With both halves the router **partitions the models across the two engines
+by itself** — qwen to the CPU, tinyllama to the GPU — and cold starts fall to
+well under half the original. Nobody wrote that rule; it is what "loading here
+costs the resident model its place" implies once the router can say it.
+
+**What this does not settle.** That improvement is in the *baseline* arm: it is
+better routing, not better placement. Reactive placement is still a coin flip on
+this cluster and now loses on cold starts (3 vs 5), because the manager keeps
+preloading qwen onto the GPU that the router has just settled tinyllama on. Its
+demand signal counts requests *routed* to a node, which measures where the router
+has been sending work rather than where work is best served — and the two
+disagree precisely when the router has learned something. That is D34's question
+and it stays open. See `docs/REAL-PLACEMENT-RESULTS.md`.
+
+**What it invalidates.** Every real-hardware campaign before this one measured a
+router that could not see the swap it was paying for, on an engine that does one
+per request. Their cold-start and routing figures stand as measured and do not
+describe the current router.
 
 ### D39 — The uncertainty band gets a floor, and the floor is measured · Settled
 
@@ -978,3 +1034,40 @@ minimum either way, which is what made this safe to change and is also why the
 defect survived five campaigns.
 
 Full measurement in `docs/UNCERTAINTY.md`.
+
+### D40 — Every guard in the harness was reporting success · Settled
+
+Found while closing D38, and it invalidates less than it sounds like but is
+worse than it sounds like.
+
+Every bench script ends with `trap cleanup EXIT`. An EXIT trap that returns
+normally hands bash the *trap's* status rather than the script's, so every
+`exit 4` / `exit 5` refusal in the harness — including the two added one commit
+earlier, specifically to stop bad data being published — printed its message
+and then told the caller **0**. A person reading the output saw the refusal. A
+wrapper, a CI job or a `&&` chain saw a pass.
+
+    trap 'rc=$?; cleanup; exit ${rc}' EXIT
+
+Verified in both directions: a guarded exit now reports 6, a clean run still
+reports 0. Applied to all eight scripts, `tests/snapshot_auth.sh` included —
+which is a ctest test, so it could have failed silently too.
+
+Two more, from the same campaign:
+
+**A run nobody measured twice.** The session paused for 2h50m with a request in
+flight; it stayed open until the router was torn down. The driver timed the run
+at 31.8 s, the trace recorded a single request lasting 10,199 s, and
+`summarize.py` folded that into a median without a word. Two independent
+measurements of one run disagreeing is a hard signal, so `real_placement.sh`
+now compares them and aborts, and `summarize.py` refuses a campaign containing a
+run an order of magnitude longer than its siblings — runs there are meant to be
+interchangeable, so one that is not measured something else.
+
+**And the first version of that guard rejected a healthy run.** It compared the
+driver's `WALL` against the trace span, not knowing `WALL` deliberately excludes
+think time and reports it separately as `idle`. 69.6 s of work plus 55.3 s idle
+against a 121.5 s trace is agreement, not disagreement. A guard that fires on
+good data is as useless as one that never fires, and it was caught only because
+it fired immediately — which is an argument for testing a new check against a
+run known to be *good*, not only against the one that motivated it.

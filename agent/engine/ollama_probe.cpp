@@ -63,6 +63,10 @@ public:
             // dispatched; inventing it here would be a guess in a field the
             // eviction policy reads as fact.
             r.last_used_ms = 0;
+            // The expiry it does report, though, is the engine's own statement
+            // about how long it intends to keep this model. A model gone before
+            // it is a model the engine displaced (D38).
+            r.expires_at_ms = parse_iso8601(m["expires_at"].as_str());
             out.models_resident.push_back(std::move(r));
         }
 

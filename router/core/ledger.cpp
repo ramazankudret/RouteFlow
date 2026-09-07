@@ -139,6 +139,24 @@ int64_t NodeLedger::last_served_ms(const std::string& node_id,
     return it == last_served_.end() ? 0 : it->second;
 }
 
+uint32_t NodeLedger::models_served_since(const std::string& node_id,
+                                         const std::string& except_model,
+                                         int64_t since_ms) const {
+    const std::string prefix = node_id + '';
+    uint32_t n = 0;
+    // The map is keyed node|model and sorted, so the node's entries are one
+    // contiguous run.
+    for (auto it = last_served_.lower_bound(prefix);
+         it != last_served_.end() && it->first.compare(0, prefix.size(), prefix) == 0;
+         ++it) {
+        if (it->second <= since_ms) continue;
+        if (it->first.compare(prefix.size(), std::string::npos, except_model) == 0)
+            continue;
+        ++n;
+    }
+    return n;
+}
+
 Json NodeLedger::to_json() const {
     Json out = Json::object();
     for (const auto& kv : nodes_) {

@@ -45,7 +45,11 @@ done
 
 mkdir -p "${OUT}"
 cleanup() { pkill -f '[r]outeflow-(agent|router)' 2>/dev/null || true; }
-trap cleanup EXIT
+# An EXIT trap that returns normally hands bash the trap's status, not the
+# script's, so every `exit N` below was reported to the caller as 0 -- the
+# refusal printed and the harness looked like it had passed. Re-exiting with
+# the saved status is the fix.
+trap 'rc=$?; cleanup; exit ${rc}' EXIT
 cleanup; sleep 1
 
 for e in "${GPU_ENGINE}" "${CPU_ENGINE}"; do
@@ -162,6 +166,46 @@ run_arm() {   # $1 placement, $2 trace, $3 replay, $4 label
   if [[ "${failed}" != "0" ]]; then
     echo "  $4 had ${failed} failed request(s); aborting rather than reporting it" >&2
     exit 5
+  fi
+  # Two independent measurements of the same run: what the driver timed, and
+  # what the router wrote down. They should agree. When they do not, one of
+  # them is measuring something else -- a laptop that suspended mid-request, a
+  # stream the router never saw close -- and neither is a benchmark result.
+  # This caught a run the trace called 10,199 seconds and the driver called 31.
+  #
+  # The driver's WALL deliberately excludes think time and reports it separately
+  # as `idle`, so the two only line up once idle is added back. The first
+  # version of this check compared them raw and rejected a perfectly good run,
+  # which is the same mistake in the opposite direction: a guard that fires on
+  # healthy data is as useless as one that never fires.
+  local wall idle budget trace_span
+  wall=$(echo "${line}" | awk '{print $2}')
+  idle=$(echo "${line}" | awk '{print $8}')
+  trace_span=$(python3 - "$2" <<'PY'
+import json, sys, datetime
+def ms(s):
+    return datetime.datetime.strptime(s[:23], '%Y-%m-%dT%H:%M:%S.%f').replace(
+        tzinfo=datetime.timezone.utc).timestamp() * 1000
+lo = hi = None
+for line in open(sys.argv[1], encoding='utf-8'):
+    line = line.strip()
+    if not line:
+        continue
+    r = json.loads(line)
+    if r.get('outcome') != 'ok':
+        continue
+    a, b = ms(r['ts_received']), ms(r['ts_done'])
+    lo = a if lo is None else min(lo, a)
+    hi = b if hi is None else max(hi, b)
+print(f"{(hi - lo) / 1000.0:.3f}" if lo is not None else "0")
+PY
+  )
+  if ! python3 -c "import sys; sys.exit(0 if float('${trace_span}') <= (float('${wall}') + float('${idle}')) * 1.5 + 5 else 1)"; then
+    echo "  $4: the driver saw ${wall}s of work plus ${idle}s idle, and the" >&2
+    echo "  trace spans ${trace_span}s." >&2
+    echo "  They are measuring the same run, so one of them is wrong. Aborting" >&2
+    echo "  rather than publishing a median over it." >&2
+    exit 6
   fi
   # What placement actually did, which the trace cannot show: a preload is not a
   # job and leaves no record of its own.

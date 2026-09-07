@@ -129,6 +129,10 @@ Json NodeState::to_json() const {
     j["engine"] = Json(to_string(engine));
     j["engine_healthy"] = Json(engine_healthy);
     j["engine_slots"] = Json(engine_slots);
+    // Null rather than 0 while undemonstrated: "we have not seen a ceiling" is
+    // not "the ceiling is zero" (§10).
+    j["models_resident_limit"] =
+        models_resident_limit > 0 ? Json(models_resident_limit) : Json();
     j["residency_known"] = Json(residency_known);
     j["models_on_disk"] = string_array(models_on_disk);
 
@@ -138,6 +142,7 @@ Json NodeState::to_json() const {
         e["name"] = Json(m.name);
         e["vram_bytes"] = Json(m.vram_bytes);
         e["last_used_ms"] = Json(m.last_used_ms);
+        e["expires_at_ms"] = m.expires_at_ms > 0 ? Json(m.expires_at_ms) : Json();
         res.push_back(std::move(e));
     }
     j["models_resident"] = std::move(res);
@@ -167,6 +172,8 @@ bool NodeState::from_json(const Json& j, NodeState& out) {
     out.engine = engine_kind_from_string(j["engine"].as_str());
     out.engine_healthy = j["engine_healthy"].as_bool();
     out.engine_slots = std::max(1u, j["engine_slots"].as_u32(1));
+    // Absent from an older agent, which is the same as undemonstrated.
+    out.models_resident_limit = j["models_resident_limit"].as_u32(0);
     // Absent in a state from an older agent: assume known, which is what every
     // engine except an old LM Studio actually reports.
     out.residency_known = j.has("residency_known") ? j["residency_known"].as_bool() : true;
@@ -178,6 +185,7 @@ bool NodeState::from_json(const Json& j, NodeState& out) {
         m.name = res.at(i)["name"].as_str();
         m.vram_bytes = res.at(i)["vram_bytes"].as_u64();
         m.last_used_ms = res.at(i)["last_used_ms"].as_i64();
+        m.expires_at_ms = res.at(i)["expires_at_ms"].as_i64();
         if (!m.name.empty()) out.models_resident.push_back(std::move(m));
     }
     for (const auto& kv : j["model_disk_bytes"].fields())

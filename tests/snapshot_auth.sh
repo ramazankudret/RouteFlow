@@ -45,7 +45,11 @@ cleanup() {
   rm -rf "${WORK}"
   return ${rc}
 }
-trap cleanup EXIT
+# An EXIT trap that returns normally hands bash the trap's status, not the
+# script's, so every `exit N` below was reported to the caller as 0 -- the
+# refusal printed and the harness looked like it had passed. Re-exiting with
+# the saved status is the fix.
+trap 'rc=$?; cleanup; exit ${rc}' EXIT
 
 ok()   { echo "  ok    $1"; }
 fail() { echo "  FAIL  $1"; FAILURES=$((FAILURES + 1)); }

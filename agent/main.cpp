@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "agent/engine/engine_probe.h"
+#include "agent/engine/residency_limit.h"
 #include "agent/sim/sim_node.h"
 #include "agent/telemetry/telemetry.h"
 #include "common/config.h"
@@ -289,6 +290,9 @@ int main(int argc, char** argv) {
     std::thread poller([&] {
         float smoothed_util = 0.f;
         bool have_util = false;
+        // Lives across polls: what it knows is the difference between two of
+        // them (D38).
+        rf::ResidencyLimit residency_limit;
         // Light smoothing, as §5 specifies: raw utilization is spiky enough to
         // flip a ranking between two samples of an otherwise identical cluster.
         constexpr float kUtilAlpha = 0.3f;
@@ -320,6 +324,9 @@ int main(int argc, char** argv) {
                 s.model_disk_bytes = r.model_disk_bytes;
                 s.models_resident = r.models_resident;
                 s.inflight_reported = r.inflight;
+                s.models_resident_limit = residency_limit.observe(
+                    s.models_resident, s.residency_known, s.vram_free_bytes,
+                    s.sampled_at_ms);
             } else {
                 s.telemetry_backend = telemetry->name();
                 std::vector<rf::GpuSample> samples;
@@ -361,6 +368,9 @@ int main(int argc, char** argv) {
                     s.model_disk_bytes = std::move(r.model_disk_bytes);
                     s.models_resident = std::move(r.models_resident);
                     s.inflight_reported = r.inflight;
+                    s.models_resident_limit = residency_limit.observe(
+                        s.models_resident, s.residency_known, s.vram_free_bytes,
+                        s.sampled_at_ms);
                 } else {
                     // A dead engine is a visible unhealthy node, not a missing
                     // one: the router must be able to say why it was rejected.

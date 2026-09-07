@@ -55,6 +55,9 @@ public:
     bool model_busy(const std::string& node_id, const std::string& model) const override;
     int64_t last_served_ms(const std::string& node_id,
                            const std::string& model) const override;
+    uint32_t models_served_since(const std::string& node_id,
+                                 const std::string& except_model,
+                                 int64_t since_ms) const override;
 
     // Diagnostics for /admin/stats and the UI.
     Json to_json() const;

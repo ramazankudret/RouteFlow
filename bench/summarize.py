@@ -170,6 +170,27 @@ def main():
         print(f"  {label:<26}{fmt(a, digits):>14}{fmt(b, digits):>14}"
               f"{delta:>+9.1f}%{mark}")
 
+    # Every run in a campaign issues the same requests with the same think time,
+    # so the runs are exchangeable and a run far outside its siblings is not a
+    # slow run, it is a broken one. Measured once: a laptop suspended mid-request
+    # and one trace spanned 10,199 seconds against a median of 98, which shifted
+    # the published median without changing anything visible in the output.
+    for label, agg in ((args.baseline, base), (args.policy, test)):
+        walls = sorted(agg["walls"])
+        if len(walls) < 3:
+            continue
+        mid = walls[len(walls) // 2]
+        outliers = [w for w in walls if w > mid * 10]
+        if outliers:
+            print(f"\nREFUSING TO SUMMARISE: {label} has a run of "
+                  f"{max(outliers):.0f}s against a median of {mid:.0f}s.",
+                  file=sys.stderr)
+            print("Runs in a campaign are meant to be interchangeable. One that "
+                  "is an order of magnitude longer measured something else -- a "
+                  "suspend, a hung stream, a clock jump -- and averaging it in "
+                  "would move the result without showing why.", file=sys.stderr)
+            return 4
+
     # Unequal arms mean a run failed or a trace is missing, and a median over
     # whatever survived is a comparison between two different experiments.
     if base["runs"] != test["runs"]:

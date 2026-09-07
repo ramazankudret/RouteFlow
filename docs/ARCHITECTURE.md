@@ -210,6 +210,7 @@ struct ResidentModel {
     std::string name;
     uint64_t    vram_bytes;
     int64_t     last_used_ms;      // epoch ms; 0 if never observed by us
+    int64_t     expires_at_ms;     // when the engine says it will drop this; 0 = it does not say
 };
 
 // A candidate machine and its live state. Produced by the agent layer.
@@ -227,12 +228,33 @@ struct NodeState {
     EngineKind         engine;              // Ollama | LMStudio | Simulated | None
     bool               engine_healthy;
     uint32_t           engine_slots;        // parallel requests the engine accepts
+    uint32_t           models_resident_limit; // models it will KEEP; 0 = unknown
     std::vector<std::string>   models_on_disk;
     std::vector<ResidentModel> models_resident;
     uint32_t           inflight_reported;   // engine's own view; advisory only
     int64_t            sampled_at_ms;
 };
 
+```
+
+`engine_slots` and `models_resident_limit` answer different questions, and for a
+long time only the first was asked. An engine can accept one request at a time
+and hold four models, or accept four and hold one; the second number is what
+decides whether loading a model here costs another model its place. No engine
+reports it, so the agent watches for it: a model that leaves the resident set
+*before its own `expires_at`*, while a different one arrives and there were
+free bytes for both, is the engine showing its ceiling. Two such observations
+and the limit is published; until then it is 0 and the router behaves exactly
+as it did before (D38, `agent/engine/residency_limit.h`).
+
+Where it lands: `believed_loaded()` stops trusting a recent completion once the
+engine has served its whole ceiling in other models; admission plans and prices
+the displacement instead of discovering it afterwards; and the placement manager
+puts a crowded preload through the same "only displace something wanted less"
+test it already applied to a VRAM shortfall, which is how a preload that is
+really a swap comes to be declined.
+
+```c++
 // What the router knows about an incoming request before dispatch.
 struct RequestFeatures {
     std::string  model;
