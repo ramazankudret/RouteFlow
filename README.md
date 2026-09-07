@@ -17,6 +17,24 @@ whole project.
 
 C++17, no third-party libraries. JSON, HTTP/1.1 and SSE are in `common/`.
 
+## Is this for you
+
+It helps if all of these are true:
+
+- **More than one machine with an inference engine**, and they are *different* —
+  different card, or a card and a CPU. Two identical nodes have no trade to make;
+  one node has nothing to route.
+- **More models than nodes.** With a model per node a warmth-aware router simply
+  gives each one a home and the question disappears — measured, 1 cold start in
+  20 requests. The problem exists when something must always lose its place.
+- **Batch or agent traffic**, where what matters is when the whole job finishes.
+  If a person is watching the first token appear, read `docs/TTFT-DECISION.md`
+  first: RouteFlow makes that number *worse*, deliberately, and measuring the
+  alternative did not produce a better answer.
+
+It will do nothing for a single GPU, and it is not a serving framework — it
+routes to the engines you already run, speaking their APIs.
+
 ## Build
 
 Needs CMake ≥ 3.16 and a C++17 compiler. Developed on WSL Ubuntu with g++ 13.
@@ -102,6 +120,18 @@ bench/phase3.sh                       # Phase 3: placement against the engine's 
 bench/phase3.sh --think-ms 8000       #   ... with gaps between turns
 bench/real_learning.sh                # the estimator against a real engine
 bench/real_two_node.sh                # Warmth vs RoundRobin on a GPU and a CPU engine
+bench/real_placement.sh               # placement on real engines, at both think times
+```
+
+And on a real network, with each node in its own container and its own network
+namespace — the topology the agent exists for, and the only place the router's
+failure handling can actually be exercised:
+
+```bash
+bench/real_cluster.sh up              # nodes on a Docker bridge, engine on loopback
+bench/real_cluster.sh faults          # partition, freeze, 300ms netem, kill, engine death
+bench/real_cluster.sh ratio gpu       # a second cluster shape: two comparable nodes
+bench/real_cluster.sh down
 ```
 
 Analysis over any trace, no re-run needed:
@@ -128,8 +158,11 @@ python3 bench/predictive_ceiling.py "bench/results-*/lru-run*.jsonl"
 | `docs/PHASE4-DECISION.md` | predictive placement: measured, and declined |
 | `docs/REAL-HARDWARE-RESULTS.md` | the estimator on an actual GPU |
 | `docs/REAL-TWO-NODE-RESULTS.md` | Warmth against RoundRobin on two real engines, GPU and CPU |
+| `docs/REAL-PLACEMENT-RESULTS.md` | placement on real engines: a preload turned out to be a swap |
+| `docs/UNCERTAINTY.md` | what the 1-sigma band actually covered, and the floor it got |
 | `docs/TTFT-DECISION.md` | why the TTFT regression is not fixed, measured against the alternative |
 | `docs/CLUSTER-RESULTS.md` | the cluster on a real network, and what happens when a node leaves it |
+| `docs/UI-BRIEF.md` | the operator console's brief (Turkish) |
 
 ## What is not claimed
 
@@ -156,10 +189,20 @@ Two are not simulated:
   the complete reply arrive nearly three times later at p95. Declined, the way
   Phase 4 was.
 
-Both are single sittings on one machine, weaker evidence than the five-run
-simulated campaigns, and both documents say where they are weak. TTFT in
-particular goes the wrong way in the two-node run, and that is reported rather
-than buried.
+These are single sittings on one machine, weaker evidence than the five-run
+simulated campaigns, and each document says where it is weak. TTFT in particular
+goes the wrong way in the two-node run, and that is reported rather than buried.
+
+- `docs/CLUSTER-RESULTS.md` — the same cluster with each node in its own
+  container and its own network namespace, so a node can be partitioned, frozen,
+  slowed or killed. Fourteen assertions across five faults. It is where D42 was
+  found, and it is the reason the failure handling is no longer merely written.
+
+**What is still not tested: two physical GPUs.** Every heterogeneous result here
+comes from a card paired with a CPU engine, or from two engines sharing one
+card. The mechanism does not depend on that, but the seconds do, and so does one
+conclusion — `docs/TTFT-DECISION.md` measures both ratios precisely because its
+answer turns on which shape you have.
 
 The reports say what did not work as plainly as what did. Phase 3 failed its
 exit criterion on saturated traffic and met it once the workload left gaps, and
@@ -176,3 +219,9 @@ refusal, a benchmark that threw away what its own agents had learned ten times
 over, and — once the nodes were put behind a real network — a retry that went
 back to the node that had just failed, because an exclusion list was built and
 never handed over. `docs/DECISIONS.md` D36 through D42.
+
+That is the honest summary of the project's state: the four phases are closed
+with measured exit criteria, the premise is demonstrated on real engines and on
+a real network, and **nobody has run it but its author**. Every failure mode
+listed above is one a benchmark happened to walk into. The next one will be
+found by whoever points it at traffic that was not designed to test it.
