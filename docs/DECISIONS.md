@@ -1071,3 +1071,52 @@ against a 121.5 s trace is agreement, not disagreement. A guard that fires on
 good data is as useless as one that never fires, and it was caught only because
 it fired immediately — which is an argument for testing a new check against a
 run known to be *good*, not only against the one that motivated it.
+
+### D41 — TTFT is a trade, not a defect; and the harness was discarding measurements · Settled
+
+Every real two-node campaign reported the same loss: Warmth's first token is
+late. It pays a load to get a faster decode, so the first token slips and the
+last one arrives early — the premise, seen from the wrong end. §9 says
+wall-clock is the criterion for agent workloads, which is an assumption about
+the caller and had never been tested against the alternative.
+
+`bench/ttft_frontier.py` tests it on traces already taken, because D10 keeps the
+losing candidates' estimates for exactly this. Scoring `total + w * ttft`:
+
+- the two objectives disagree on 33 of 80 requests, so the trade is real;
+- it costs **2.16 ms of total time per 1 ms of first token**;
+- **no weight moves TTFT p50 at all.** Only the tail responds: p95 2,805 →
+  1,803 ms for +61% total time. The frontier is a straight line with a bad
+  slope, so a knob would only let an operator slide along it.
+
+And it does not serve the person waiting either: under min-ttft the median
+first token is unchanged, the median complete reply is *later*, and its p95 goes
+3,961 → 11,236 ms. **Decision: do not build it.** No `ttft_weight`, no
+interactive policy — measured-and-declined, like Phase 4. The caveat that
+matters: this depends on the warm node being the *slow* one. On two comparable
+GPUs the trade would be free rather than bad, and this substitute cannot test
+that.
+
+**Found on the way, and worth more than the answer.** The TTFT analysis was
+untrustworthy at first: the model predicted a 190 ms first token where 1,981 ms
+was measured. The cause was 22 of 80 requests priced at zero load while the node
+reported the model absent — D38's residency limit not yet learned. The agent
+infers it by watching for a model dropped before its expiry, and at a 1 Hz poll
+against sub-second requests it misses most swaps and needs about six to
+converge.
+
+The harness was restarting the agents on **every run**, ten times a campaign, so
+a quarter of each run was scored against an unknown limit. The distinction it
+was missing: *the router is what is under test; the agents report facts about a
+node that hold whatever policy is running.* Killing them throws away
+measurements that are not part of the experiment. Now only the router restarts.
+
+After that, all 80 requests agree with the engine — the "priced no load, node
+says absent" case is empty — and the load prediction lands within 300 ms of the
+measured cost. The wall-clock margin recovered from −12.7% to −25.6% at 25/25.
+
+Which leaves a caveat that should have been visible earlier: the same harness
+put RoundRobin's median at 48.81 s in one campaign and 56.57 s in the next, a
+16% swing in a baseline whose routing depends on none of this. The direction and
+the pairwise result have held every time; the margin should be read as roughly a
+quarter, not as 25.6%.

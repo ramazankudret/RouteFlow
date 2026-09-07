@@ -128,6 +128,7 @@ python3 bench/predictive_ceiling.py "bench/results-*/lru-run*.jsonl"
 | `docs/PHASE4-DECISION.md` | predictive placement: measured, and declined |
 | `docs/REAL-HARDWARE-RESULTS.md` | the estimator on an actual GPU |
 | `docs/REAL-TWO-NODE-RESULTS.md` | Warmth against RoundRobin on two real engines, GPU and CPU |
+| `docs/TTFT-DECISION.md` | why the TTFT regression is not fixed, measured against the alternative |
 
 ## What is not claimed
 
@@ -143,11 +144,16 @@ Two are not simulated:
   requests improve, and the seeded prefill rate for that card turns out to be
   about seven times optimistic.
 - `docs/REAL-TWO-NODE-RESULTS.md` — Warmth against RoundRobin, on two real
-  engines: one on the card, one on the CPU. Warmth is 12.7% faster on
-  wall-clock, 24/25 pairwise, **while taking fifteen times more cold starts** —
-  which is the premise working rather than failing. That page also shows what
-  the number was before D38 (24.2%, 25/25) and what changed when the router
-  learned to see the swap it was paying for.
+  engines: one on the card, one on the CPU. Warmth is about a quarter faster on
+  wall-clock, 25/25 pairwise, **while taking seven times more cold starts** —
+  which is the premise working rather than failing. That page also keeps the
+  pre-D38 figures and says how far they moved, and reports that the baseline
+  itself swings 16% between campaigns.
+- `docs/TTFT-DECISION.md` — the loss that every one of those pages reported.
+  Warmth's first token is 40% later. Measured against the alternative, a
+  TTFT-aware objective does not move the median first token *at all* and makes
+  the complete reply arrive nearly three times later at p95. Declined, the way
+  Phase 4 was.
 
 Both are single sittings on one machine, weaker evidence than the five-run
 simulated campaigns, and both documents say where they are weak. TTFT in
@@ -161,8 +167,9 @@ rather than built. One published result was retracted outright, and one headline
 figure was cut in half by a later fix — both are still on the page, next to what
 replaced them.
 
-Real hardware found five defects that five simulated campaigns could not: a 503
+Real hardware found six defects that five simulated campaigns could not: a 503
 after a load, learning that was inert against a real engine, a preload that was
 really a swap, an uncertainty band covering 7-14% of outcomes where it claimed
-68%, and — last — every guard in the benchmark harness reporting success while
-it printed its refusal. `docs/DECISIONS.md` D36 through D40.
+68%, every guard in the benchmark harness reporting success while it printed its
+refusal, and a benchmark that threw away what its own agents had learned ten
+times over. `docs/DECISIONS.md` D36 through D41.

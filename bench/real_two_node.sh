@@ -50,13 +50,26 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "${OUT}"
-cleanup() { pkill -f '[r]outeflow-(agent|router)' 2>/dev/null || true; }
+# The router is what is under test, so it is restarted for every run. The
+# agents are not: they report facts about a node -- how fast it loads, how many
+# models its engine keeps -- that hold whatever policy is running, and killing
+# them throws those measurements away.
+#
+# That was not free. The agent works out an engine's resident-model limit by
+# watching for a model dropped before its expiry (D38), and at a 1 Hz poll
+# against sub-second requests it misses most swaps and needs about six to
+# converge. Restarting it every run meant roughly a quarter of each run was
+# scored against an unknown limit: 22 of 80 requests were priced at zero load
+# and cost 2,117 ms at the median. A production agent runs for hours and pays
+# that window once; this harness was paying it ten times.
+cleanup_all() { pkill -f '[r]outeflow-(agent|router)' 2>/dev/null || true; }
+cleanup() { pkill -f '[r]outeflow-router' 2>/dev/null || true; }
 # An EXIT trap that returns normally hands bash the trap's status, not the
 # script's, so every `exit N` below was reported to the caller as 0 -- the
 # refusal printed and the harness looked like it had passed. Re-exiting with
 # the saved status is the fix.
-trap 'rc=$?; cleanup; exit ${rc}' EXIT
-cleanup; sleep 1
+trap 'rc=$?; cleanup_all; exit ${rc}' EXIT
+cleanup_all; sleep 1
 
 for e in "${GPU_ENGINE}" "${CPU_ENGINE}"; do
   curl -s -m 5 "http://${e}/api/tags" >/dev/null || { echo "engine ${e} unreachable"; exit 1; }
@@ -107,8 +120,8 @@ wall = time.monotonic() - started
 print("WALL %.3f ok %d failed %d" % (wall, ok, failed))
 PY
 
-start_cluster() {   # $1 policy, $2 trace, $3 replay ("" for none)
-  cleanup; sleep 1
+start_agents() {
+  pgrep -f '[r]outeflow-agent' >/dev/null && return 0   # already watching
   # The GPU node reads NVML. The CPU node has no VRAM to report, so it says so
   # rather than borrowing the card's numbers -- admission then treats the engine
   # as the authority, which is exactly right for a node whose memory is RAM.
@@ -119,6 +132,11 @@ start_cluster() {   # $1 policy, $2 trace, $3 replay ("" for none)
       --engine.kind ollama --engine.endpoint "${CPU_ENGINE}" \
       --telemetry null --log.level error >/dev/null 2>&1 &
   sleep 3
+}
+
+start_cluster() {   # $1 policy, $2 trace, $3 replay ("" for none)
+  cleanup; sleep 1
+  start_agents
   local replay=(--replay_trace false)
   [[ -n "$3" ]] && replay=(--replay_from "$3")
   rm -f "$2"
