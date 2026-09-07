@@ -913,3 +913,68 @@ One smaller lesson, recorded because it cost a campaign: the manager's
 `evictions` counter reads 0 throughout. It is accurate about what the manager
 did and silent about what happened, and a counter that only sees its own actions
 is not measuring the system.
+
+### D39 — The uncertainty band gets a floor, and the floor is measured · Settled
+
+A 1-sigma band should contain the outcome about 68% of the time. Measured out
+of sample on five corpora, this one contained **7-14% on real hardware** and
+48-81% in simulation. The simulated 69% average was two failures cancelling:
+`load: 22%`, `warm: 93%`.
+
+The reason is visible in the formula. Sigma was output-length uncertainty
+divided by the decode rate, in quadrature with a **guessed fraction** of the
+load time — 0.12 learned, 0.30 seeded. So it described how long the reply might
+be and nothing else: no queue term (coverage in that regime: 5-10%), no prefill
+term, nothing for a rate being wrong, and nothing at all for the router being
+wrong about the world, which is where the largest real errors come from (D38).
+Records whose output length was predicted *to the token* still missed by 92 ms
+at the median.
+
+`f` was the last guessed constant in a cost model whose premise is that
+constants get replaced by measurements.
+
+**The fix is a floor, not a term:**
+
+    sigma = max( analytic band, learned_MAD(node, regime) * 1.2533 )
+
+- Regime is `load` / `queue` / `warm`, taken from the terms the estimate itself
+  priced — pooling them reproduces the original defect somewhere new.
+- 1.2533 is the MAD-to-sigma ratio for a normal, taken from the distribution
+  rather than fitted, so the coverage claimed is a prediction that could fail.
+- A floor because adding it in quadrature would let a wide history swamp a
+  confident estimate. It may only widen, so every rate Phase 2 learned still
+  sharpens the band.
+- Learned only from records this cost model wrote, gated on `cost_model`. A
+  replayed trace carries the *other* model's error, and adopting it floors our
+  band with somebody else's misses — D31's trap in a new place.
+
+**Measured end to end, not just as a rule.** Re-running the real two-node
+campaign took coverage from **14% to 65%**, and the three regimes from
+25/3/0% to 59/70/67%. Re-running simulated Phase 2 changed **no routing, no
+cold-start count, and not one `within_noise` label** (59/125 both times):
+there the analytic band was already wider than the floor, so the floor does
+not bind. That is the property being bought.
+
+Five rules were scored on all five corpora before any C++ was written
+(`bench/sigma_calib.py`). The winner is not the widest or the
+highest-coverage. A rule that *replaced* the analytic band scored higher on the
+real corpora and made the capped Phase 2 corpus worse (81% → 67%), because
+there the analytic band was doing real work. That is the argument for a floor,
+and the reason for scoring on corpora the fix was not motivated by.
+
+**What it does not fix.** It is a band, not a mean. A floor cannot correct a
+prediction that is systematically 2.8 s low on cold starts; it can only stop the
+router calling that prediction precise. The mean error is D38's, and D38 stays
+open.
+
+**What it invalidates.** Every `within_noise` count published in this repository
+was computed with a band 7-12× too narrow in the cold regime, so those figures
+understate how many decisions were coin flips. On the real two-node cluster the
+honest count is **46 of 80, not 13 of 80** — the router was presenting 84% of
+its choices as considered decisions when fewer than half were distinguishable
+from noise. Nothing else moves: sigma has
+never influenced routing, only its description — `candidates.cpp` picks the
+minimum either way, which is what made this safe to change and is also why the
+defect survived five campaigns.
+
+Full measurement in `docs/UNCERTAINTY.md`.

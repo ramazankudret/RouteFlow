@@ -671,6 +671,93 @@ void test_learned_cost_model() {
     check(inherited.sigma < 40.f,
           "and its error is not adopted as our own uncertainty");
 
+    // The band has a floor, and the floor is measured (D39). Sigma was built
+    // from output-length error and a guessed fraction of the load time: no
+    // queue term, no prefill term, nothing for a rate being wrong. On real
+    // hardware it covered 7-14% of outcomes where a 1-sigma band covers 68%.
+    {
+        auto band = rf::make_learned_cost_model(scoring);
+        rf::NodeState node = cluster[1];
+
+        const rf::Estimate before =
+            band->estimate(req, node, ledger, none, rf::now_ms());
+
+        // Records this model produced, whose outcome missed the prediction by
+        // a wide and consistent margin. Nothing here teaches a rate: the
+        // prediction is simply wrong, which is the case sigma exists for.
+        for (int i = 0; i < 20; ++i) {
+            rf::TraceRecord r = make_record("sim-jetson", "planner:12b", true,
+                                            1200, 200, 400, 2000, 1);
+            r.cost_model = band->name();
+            r.predicted_total_ms = 2400;
+            r.total_ms = 12400;             // out by ten seconds, every time
+            rf::Candidate c;
+            c.node_id = "sim-jetson";
+            c.admitted = true;              // warm regime: no load, no queue
+            r.candidates.push_back(c);
+            band->observe(r);
+        }
+        const rf::Estimate after =
+            band->estimate(req, node, ledger, none, rf::now_ms());
+        check(after.sigma_ms > before.sigma_ms * 3,
+              "a node that has been consistently wrong stops claiming a narrow "
+              "band");
+        check(after.sigma_ms > 9000,
+              "and the floor is the size of the miss, not a fraction of it");
+
+        // A floor, not a term. The same history must not widen a regime it was
+        // never measured in, or one node's bad luck would price every other
+        // candidate.
+        rf::NodeState other = cluster[0];
+        const rf::Estimate elsewhere =
+            band->estimate(req, other, ledger, none, rf::now_ms());
+        check(elsewhere.sigma_ms < 9000,
+              "the floor belongs to the node that earned it, not to the cluster");
+
+        // And it may only widen. A model that is accurate must keep the
+        // sharpness Phase 2 bought it, or learning to predict well would cost
+        // it the ability to say so.
+        auto sharp = rf::make_learned_cost_model(scoring);
+        const rf::Estimate sharp_before =
+            sharp->estimate(req, node, ledger, none, rf::now_ms());
+        for (int i = 0; i < 20; ++i) {
+            rf::TraceRecord r = make_record("sim-jetson", "planner:12b", true,
+                                            1200, 200, 400, 2000, 1);
+            r.cost_model = sharp->name();
+            r.predicted_total_ms = r.total_ms;   // dead on, every time
+            rf::Candidate c;
+            c.node_id = "sim-jetson";
+            c.admitted = true;
+            r.candidates.push_back(c);
+            sharp->observe(r);
+        }
+        const rf::Estimate sharp_after =
+            sharp->estimate(req, node, ledger, none, rf::now_ms());
+        check(sharp_after.sigma_ms <= sharp_before.sigma_ms + 1.0,
+              "a model that keeps being right is not punished with a wider band");
+
+        // Same trap as D31: a record written by another cost model carries that
+        // model's error. Adopting it would floor our band with somebody else's
+        // misses.
+        auto borrowed = rf::make_learned_cost_model(scoring);
+        for (int i = 0; i < 20; ++i) {
+            rf::TraceRecord r = make_record("sim-jetson", "planner:12b", true,
+                                            1200, 200, 400, 2000, 1);
+            r.cost_model = "static-v1";
+            r.predicted_total_ms = 2400;
+            r.total_ms = 12400;
+            rf::Candidate c;
+            c.node_id = "sim-jetson";
+            c.admitted = true;
+            r.candidates.push_back(c);
+            borrowed->observe(r);
+        }
+        const rf::Estimate not_ours =
+            borrowed->estimate(req, node, ledger, none, rf::now_ms());
+        check(not_ours.sigma_ms < 9000,
+              "another model's error does not become our floor (D31, D39)");
+    }
+
     // Footprint: one node holding the model prices a load onto a node that does
     // not (D35). The weights are the same bytes on any GPU, so the overhead
     // over disk size transfers where an absolute byte count would not.

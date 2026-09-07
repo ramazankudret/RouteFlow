@@ -109,6 +109,13 @@ against them — not that it dominates them.
 
 ## Half the decisions are inside the noise band
 
+> **Superseded in part by D39.** Every `within_noise` count on this page was
+> computed with a band that has since been measured and found 7-12× too narrow
+> in the cold regime — so the real number of coin-flip decisions is *higher*
+> than reported here, not lower. Wall-clock, cold starts and every other figure
+> are unaffected: sigma has never influenced routing, only its description.
+> See `docs/UNCERTAINTY.md`.
+
 **64 of 125 Warmth decisions were recorded as `within_noise`** — the margin
 between the best two candidates was smaller than the uncertainty on either.
 

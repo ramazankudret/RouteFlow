@@ -433,12 +433,21 @@ mirror: the seconds the *next* request will pay because this one took the VRAM.
 Without it the policy is self-defeating under memory pressure, so `evict_weight`
 defaults to 0.5 and ON. Set it to 0 to reproduce rev 1 behaviour.
 
-**Uncertainty.** `sigma_ms` is dominated by the output-length prediction:
-`sigma_ms ≈ predicted_output_sigma / effective_decode_rate`, combined in
-quadrature with the load-time residual. When `margin_ms` is smaller than the
-`sigma_ms` of either of the top two candidates, the decision is not
-distinguishable from noise; the policy still picks the lowest total, but records
-`decided_by = "within_noise"`. An honest scheduler says when it is guessing.
+**Uncertainty.** The analytic band is dominated by the output-length
+prediction: `predicted_output_sigma / effective_decode_rate`, combined in
+quadrature with the load-time residual. That band alone describes how long the
+reply might be and little else — it has no queue term and no prefill term — so
+the learned cost model puts a **floor** under it: the residual its own
+predictions have shown on this node in this regime (`load` / `queue` / `warm`).
+The floor may only widen the band, never narrow it, so a node that really is
+predictable keeps the sharpness Phase 2 bought it. Measured, this took real
+coverage of a 1-sigma band from 14% to 65% (D39, `docs/UNCERTAINTY.md`).
+
+When `margin_ms` is smaller than the `sigma_ms` of either of the top two
+candidates, the decision is not distinguishable from noise; the policy still
+picks the lowest total, but records `decided_by = "within_noise"`. An honest
+scheduler says when it is guessing — which only means anything if the band it
+is measured against is honest too.
 
 Optional penalty terms, off by default, behind config flags:
 

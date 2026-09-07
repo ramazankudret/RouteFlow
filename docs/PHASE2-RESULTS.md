@@ -61,6 +61,13 @@ This matters for reading the result two ways:
   heuristic's 35%-of-cap rule, not from measured error. The thing that would
   narrow it is precisely the thing the benchmark bypasses.
 
+> **Superseded in part by D39.** Every `within_noise` count on this page was
+> computed with a band that has since been measured and found 7-12× too narrow
+> in the cold regime — so the real number of coin-flip decisions is *higher*
+> than reported here, not lower. Wall-clock, cold starts and every other figure
+> are unaffected: sigma has never influenced routing, only its description.
+> See `docs/UNCERTAINTY.md`.
+
 A workload without `max_tokens` is the obvious next measurement, and it is a
 scenario change rather than a code change.
 

@@ -29,6 +29,12 @@
 //                               any node that holds the model. Weights are the
 //                               same bytes on every GPU, so one node's
 //                               measurement prices a load onto another (D35).
+//   total_err(node, regime)     how far this model's own total-time prediction
+//                               has actually landed from the truth, per node
+//                               and per regime. It is a floor under sigma, not
+//                               a term in it: the band may never claim more
+//                               precision than the node has ever delivered
+//                               (D39).
 //
 // The split is the point. Fitting one function to "how long will this take"
 // would let a bad load estimate corrupt the decode rate, and there would be no
@@ -74,6 +80,24 @@ constexpr uint32_t kMinSamples = 3;
 // The context an engine allocates KV for by default, and therefore what an
 // observed resident size already includes. Ollama's default.
 constexpr uint32_t kObservedCtxBaseline = 4096;
+
+// An EWMA of |error| estimates mean absolute deviation, and sigma is what the
+// band is denominated in. For a normal distribution the two differ by this
+// factor. It is taken from the distribution rather than fitted to the traces,
+// so the coverage the fix claims is a prediction that can be checked and can
+// fail -- and docs/UNCERTAINTY.md checks it on five corpora.
+constexpr double kMadToSigma = 1.2533;
+
+// Which of the estimate's terms are in play. The error distributions are
+// genuinely different -- a warm, unqueued job is predictable and a cold one is
+// at the mercy of whatever the engine is doing with its memory -- so pooling
+// them produces a band that is too wide for one and too narrow for the other,
+// which is exactly what the shipped sigma did.
+const char* regime_of(double t_load_ms, double t_queue_ms) {
+    if (t_load_ms > 0) return "load";
+    if (t_queue_ms > 0) return "queue";
+    return "warm";
+}
 
 Confidence confidence_for(uint32_t samples) {
     if (samples < kMinSamples) return Confidence::Seeded;
@@ -274,13 +298,34 @@ public:
             }
         }
 
-        // --- uncertainty (D8) -------------------------------------------------
+        // --- uncertainty (D8, D39) --------------------------------------------
         // The load residual shrinks once load bandwidth is measured rather than
         // assumed. That is most of what Phase 2 buys the noise check: a cold
         // candidate stops carrying a 30% band it did not earn.
         const double sigma_decode = out.sigma / std::max(1e-9, effective_decode);
         const double sigma_load = e.t_load_ms * (load_learned ? 0.12 : 0.30);
         e.sigma_ms = std::sqrt(sigma_decode * sigma_decode + sigma_load * sigma_load);
+
+        // That analytic band is assembled from two guessed fractions and has no
+        // queue term and no prefill term at all, so it describes the length of
+        // the reply and almost nothing else. Measured, it covered 7-14% of real
+        // outcomes where a 1-sigma band should cover 68%.
+        //
+        // So it gets a floor: whatever this node has actually managed in this
+        // regime. The floor may only widen the band, never narrow it -- every
+        // rate Phase 2 learned still sharpens it, and a node that really is
+        // predictable keeps its sharpness. Measured on the real two-node
+        // cluster, coverage went 14% -> 65% and the three regimes went
+        // 25/3/0% -> 59/70/67%; re-running simulated Phase 2 changed no
+        // routing and no within_noise count at all, which is the point.
+        //
+        // It is deliberately not a *term*. Adding it in quadrature would let a
+        // wide history swamp a genuinely confident estimate; a floor only ever
+        // refuses to claim precision the node has never delivered.
+        const Ewma* resid =
+            find(total_err_, key2(node.id, regime_of(e.t_load_ms, e.t_queue_ms)));
+        if (resid && resid->has(kMinSamples))
+            e.sigma_ms = std::max(e.sigma_ms, resid->value * kMadToSigma);
 
         e.samples = worst_samples == UINT32_MAX ? 0 : worst_samples;
         e.conf = confidence_for(e.samples);
@@ -315,6 +360,27 @@ public:
             }
             output_len_[key2(r.model, r.role_hint)].add(actual, hl);
             output_len_[key2(r.model, std::string())].add(actual, hl);
+        }
+
+        // The band's floor (D39). Learned from this model's own misses only:
+        // a record written by another cost model carries *its* error, and
+        // adopting it would teach the learned model somebody else's band --
+        // the same trap D31 found for output length. Live this gate is a
+        // no-op; on replay it is the whole point.
+        if (r.predicted_total_ms > 0 && r.total_ms > 0 && r.cost_model == name()) {
+            // The regime has to be the one the estimate was made under, not one
+            // reconstructed from the outcome, so it comes from the winning
+            // candidate's own terms. A record without them teaches nothing
+            // rather than teaching a guess.
+            for (const Candidate& c : r.candidates) {
+                if (c.node_id != r.node_id || !c.admitted) continue;
+                const char* reg = regime_of(c.est.t_load_ms, c.est.t_queue_ms);
+                // Floored at a millisecond: Ewma::add refuses non-positive
+                // input, and a perfect prediction must not collapse the band.
+                total_err_[key2(r.node_id, reg)].add(
+                    std::max(1.0, std::fabs(r.total_ms - r.predicted_total_ms)), hl);
+                break;
+            }
         }
 
         if (!r.has_ttft) return;  // nothing below can be derived without it
@@ -388,6 +454,7 @@ private:
     std::map<std::string, Ewma> warm_job_ms_;    // node
     std::map<std::string, Ewma> output_len_;     // model|role
     std::map<std::string, Ewma> output_err_;     // model|role
+    std::map<std::string, Ewma> total_err_;      // node|regime
     mutable std::map<std::string, Ewma> footprint_ratio_;  // model
 };
 

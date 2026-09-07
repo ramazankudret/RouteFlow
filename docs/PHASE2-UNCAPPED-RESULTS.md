@@ -148,6 +148,13 @@ workload it fits to 16%, is describing a scheduler nobody should trust.
 The residual is now measured against the model's own prior, and `within_noise`
 falls to 59/125 — matching the capped campaign exactly.
 
+> **Superseded in part by D39.** Every `within_noise` count on this page was
+> computed with a band that has since been measured and found 7-12× too narrow
+> in the cold regime — so the real number of coin-flip decisions is *higher*
+> than reported here, not lower. Wall-clock, cold starts and every other figure
+> are unaffected: sigma has never influenced routing, only its description.
+> See `docs/UNCERTAINTY.md`.
+
 ## What this does not show
 
 - **The two error figures come from different runs.** static-v1's 176% is
