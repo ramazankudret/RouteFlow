@@ -170,6 +170,15 @@ def main():
         print(f"  {label:<26}{fmt(a, digits):>14}{fmt(b, digits):>14}"
               f"{delta:>+9.1f}%{mark}")
 
+    # Unequal arms mean a run failed or a trace is missing, and a median over
+    # whatever survived is a comparison between two different experiments.
+    if base["runs"] != test["runs"]:
+        print(f"\nREFUSING TO COMPARE: {args.baseline} has {base['runs']} run(s), "
+              f"{args.policy} has {test['runs']}.", file=sys.stderr)
+        print("A missing run is a failed run. Fix it and re-measure rather than "
+              "averaging over what is left.", file=sys.stderr)
+        return 3
+
     print(f"\n{'':<28}{args.baseline:>14}{args.policy:>14}")
     print("  " + "-" * 62)
     print("  PRIMARY — wall-clock (D12)")

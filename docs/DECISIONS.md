@@ -646,7 +646,13 @@ should assert the world it thinks it is in, because the file names, the node
 names and the output paths all agreed with each other and all of them were
 wrong.
 
-### D34 — Placement is worth having, but only where traffic leaves gaps · Settled
+### D34 — Placement is worth having, but only where traffic leaves gaps · Superseded in part by D38
+
+**The second half of this does not transfer to real hardware.** See D38 and
+`docs/REAL-PLACEMENT-RESULTS.md`: given the same gaps, a real engine with a
+resident-model limit turns every preload into a swap, and placement moves cold
+starts instead of removing them. What follows is the simulated measurement,
+which stands for a node that can hold more than one model.
 
 Phase 3 failed its exit criterion on back-to-back traffic and met it on the same
 scenario with 8 s pauses between turns: cold starts 9 → 8, wall-clock −6.3% at
@@ -863,3 +869,47 @@ already recovers a load time from ttft, so the gap is bounded and handled.
 What this bought, on the card: `prompt_tokens_actual` arriving as 36 against an
 estimated 33 — D15's estimator running about 8% low on short prompts, which
 until now was unmeasurable outside simulation.
+
+### D38 — An engine's resident-model limit is missing from the node state · Open
+
+D34 said placement is conditional: inert on back-to-back traffic, worth having
+where the workload leaves gaps. Both halves were measured on simulated nodes.
+On two real engines the first half holds exactly and **the second does not**.
+
+With 8 s gaps the manager gets its window and uses it — six or seven preloads a
+run against zero back-to-back — removes exactly one cold start, and loses on
+every latency line. Its own counters say **6-7 preloads, 0 evictions**, which is
+where the answer is.
+
+`OLLAMA_MAX_LOADED_MODELS=1` means the engine keeps one model. Loading `qwen`
+throws `tinyllama` out, the engine does it implicitly, and the manager never
+sees it. Measured: placement warmed one model on the GPU (19 of 19 cold down to
+12 of 23) and cooled the other by the same amount (19 of 40 up to 25 of 40). It
+did not remove cold starts. It moved them.
+
+**The gap is in the contract, not the reasoning.** `NodeState` carries
+`engine_slots`, which is *parallel requests the engine accepts*, and nothing
+about how many models it will keep resident. Placement decides on
+`vram_free_bytes` alone; the GPU reports ~7 GB free against two 400 MB models,
+so the router believes both fit. Ollama disagrees and has no way to say so.
+
+**A simulated node cannot contain this defect**, because its residency capacity
+*is* its VRAM by construction. `bench/profiles/pressure-*.json` gave each node
+room for two, so a preload there genuinely added one. That is the whole
+difference between the simulated verdict and the hardware.
+
+Left open rather than fixed, because the fix is a design choice and this entry
+is the measurement:
+
+- Ollama does not expose `OLLAMA_MAX_LOADED_MODELS` over its API, so the agent
+  cannot simply report it.
+- It is inferable: a preload that consistently displaces another model on the
+  same node says the capacity is one. That is learnable the way everything else
+  here is learned, and it belongs to whichever phase needs it.
+- Until then the manager cannot distinguish "preload B" from "swap A for B",
+  and those have opposite value.
+
+One smaller lesson, recorded because it cost a campaign: the manager's
+`evictions` counter reads 0 throughout. It is accurate about what the manager
+did and silent about what happened, and a counter that only sees its own actions
+is not measuring the system.
