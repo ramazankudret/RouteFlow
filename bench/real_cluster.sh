@@ -27,6 +27,12 @@ NET=rf-net
 TOKEN=cluster-secret-token
 CLIENT_TOKEN=client-secret-token
 ROUTER_PORT=8990
+# How many requests each engine serves at once, and what the agent reports as
+# engine_slots. One is the safe default and it is also the setting under which
+# contention cannot happen: Ollama queues internally, no two replies decode
+# together, and D5's alpha has nothing to learn from. Two is the smallest
+# setting that makes the question askable.
+SLOTS="${RF_CLUSTER_SLOTS:-2}"
 OUT=bench/results-real-cluster
 # Node A gets the card. Node B is CPU-only, which is the heterogeneity Phase 1
 # needs; bench/real_cluster.sh ratio builds the other shape.
@@ -66,6 +72,7 @@ start_node() {   # $1 id, $2 extra docker args
     --cap-add NET_ADMIN \
     -e RF_NODE_ID="${id}" -e RF_TOKEN="${TOKEN}" \
     -e RF_TELEMETRY="$( [[ -n "${extra}" ]] && echo nvml || echo null )" \
+    -e RF_SLOTS="${SLOTS}" -e OLLAMA_NUM_PARALLEL="${SLOTS}" \
     -v rf_models:/root/.ollama \
     -v "${HOME}/rf-build:/rf:ro" \
     routeflow-node:latest >/dev/null; then
@@ -278,6 +285,35 @@ print(sum(1 for r in rs if r.get('outcome') == 'ok' and not r.get('was_resident'
   python3 bench/ttft_frontier.py "two comparable nodes" "${trace}"
 }
 
+
+# --- concurrency, against a real engine --------------------------------------
+#
+# bench/loadgen.py has always driven concurrent sub-agents, and has always been
+# pointed at simulated nodes. So the machinery that exists *for* concurrent load
+# -- T_queue (§6.2), the contention term alpha (D5), and the ledger's protection
+# against a herd of requests all loading the same cold model (§6.3, D4) -- had
+# never run against a real engine. A simulated node models its own queue by
+# assumption; Ollama has one, with its own parallelism and its own memory
+# pressure, and this session has repeatedly shown what happens to assumptions
+# that meet it.
+concurrency() {
+  local rounds="${1:-6}" subagents="${2:-4}"
+  local trace="${OUT}/concurrency.jsonl"
+  rm -f "${trace}"
+  restore
+  start_router warmth-v1 nodes.json concurrency
+
+  echo "  ${rounds} rounds, 1 planner then ${subagents} concurrent sub-agents"
+  python3 bench/loadgen.py --router "http://127.0.0.1:${ROUTER_PORT}" \
+    --token "${CLIENT_TOKEN}" --scenario agent \
+    --rounds "${rounds}" --subagents "${subagents}" \
+    --planner-model tinyllama:latest --worker-model qwen2.5:0.5b \
+    --label "real cluster, concurrent" 2>&1 | tail -6
+
+  echo
+  python3 bench/concurrency_check.py "${trace}" "${subagents}"
+}
+
 # --- faults ------------------------------------------------------------------
 #
 # Each of these is a state the router has code for and had never been in. The
@@ -478,6 +514,7 @@ case "${1:-up}" in
   faults) faults ;;
   ratio)  ratio_up "${2:-gpu}" "${3:-14}" "${4:-1}"; ratio_measure ;;
   ratio-campaign) ratio_campaign "${2:-10}" ;;
+  concurrency) concurrency "${2:-6}" "${3:-4}" ;;
   down)   down ;;
   *)      echo "unknown command: ${1}" >&2; exit 2 ;;
 esac

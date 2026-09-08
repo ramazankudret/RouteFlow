@@ -89,7 +89,8 @@ metric and is never combined into a single number with timing error (§8).
 | `ttft_ms` | number \| null | `ts_first_token - ts_dispatched`. |
 | `total_ms` | number | `ts_done - ts_dispatched`. Excludes router-side admission. |
 | `inflight_at_dispatch` | int | **Ledger** value (D4), not telemetry. |
-| `concurrent_decoders_at_dispatch` | int | Ledger value. Required by D5. |
+| `concurrent_decoders_at_dispatch` | int | Ledger value at dispatch. Reads 0 for every member of a simultaneous burst. |
+| `concurrent_decoders_at_first_token` | int or null | Decoders on that node when this reply began, including itself. Null when the request never streamed a token. This is the one D5 uses; the field above is kept because the format is a contract (D44). |
 | `gpu_util_at_dispatch` | number \| null | `null` when `telemetry_ok == false`. |
 | `vram_free_at_dispatch` | int \| null | Same. |
 | `telemetry_backend` | string | `nvml` \| `tegra` \| `null` \| `sim`. |

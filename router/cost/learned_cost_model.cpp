@@ -402,7 +402,16 @@ public:
         if (!r.has_output_tokens || r.output_tokens == 0 || decode_ms <= 0) return;
         const double observed_decode = r.output_tokens / decode_ms;
 
-        if (r.concurrent_decoders_at_dispatch <= 1) {
+        // Prefer the count taken when decoding actually began. The dispatch
+        // sample reads zero for every member of a simultaneous burst, so on an
+        // agent workload every contended run was being taught to the model as
+        // an uncontended one -- measured on a real GPU, 111 tok/s recorded as
+        // the uncontended rate where 257 was the truth (D44). An older record
+        // carries no such field, and falls back.
+        const uint32_t decoders = r.concurrent_decoders_at_first_token > 0
+                                      ? r.concurrent_decoders_at_first_token
+                                      : r.concurrent_decoders_at_dispatch;
+        if (decoders <= 1) {
             decode_rate_[nm].add(observed_decode, hl);
         } else {
             // Contended records teach alpha, never the base rate. Solving
@@ -411,7 +420,7 @@ public:
             // order anyway.
             const Ewma* base = find(decode_rate_, nm);
             if (base && base->has(kMinSamples) && observed_decode > 0) {
-                const double n = r.concurrent_decoders_at_dispatch;
+                const double n = decoders;
                 const double solved = (base->value / observed_decode - 1.0) / (n - 1.0);
                 // A negative solution means the contended run was *faster* than
                 // the uncontended baseline — noise, not physics. Clamped rather

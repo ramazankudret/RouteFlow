@@ -102,10 +102,10 @@ void RouterState::note_load_done(NodeLedger::Token token) {
     ledger_.note_load_done(token);
 }
 
-void RouterState::note_decoding(NodeLedger::Token token) {
-    if (token == NodeLedger::kInvalid) return;
+uint32_t RouterState::note_decoding(NodeLedger::Token token) {
+    if (token == NodeLedger::kInvalid) return 0;
     std::unique_lock<std::shared_mutex> lock(mu_);
-    ledger_.note_decoding(token);
+    return ledger_.note_decoding(token);
 }
 
 void RouterState::complete(NodeLedger::Token token, const TraceRecord& record) {

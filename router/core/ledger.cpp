@@ -59,11 +59,13 @@ void NodeLedger::note_load_done(Token token) {
         acc.pending_loads.erase(pit);
 }
 
-void NodeLedger::note_decoding(Token token) {
+uint32_t NodeLedger::note_decoding(Token token) {
     auto it = entries_.find(token);
-    if (it == entries_.end() || it->second.decoding) return;
+    if (it == entries_.end()) return 0;
+    NodeAccount& acc = account(it->second.node_id);
+    if (it->second.decoding) return acc.decoders;
     it->second.decoding = true;
-    ++account(it->second.node_id).decoders;
+    return ++acc.decoders;
 }
 
 void NodeLedger::release(Token token) {

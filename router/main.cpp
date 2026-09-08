@@ -65,6 +65,10 @@ void usage() {
         "  --nodes PATH               nodes.json (default: nodes.json)\n"
         "  --node.token SECRET        bearer token presented to agents\n"
         "  --trace PATH               trace file (default: trace.jsonl)\n"
+        "  --trace.max_bytes N        rotate the trace past N bytes; 0 = never\n"
+        "                             (default 134217728, 128 MiB)\n"
+        "  --replay.tail_bytes N      replay only the last N bytes of the trace\n"
+        "                             on start; 0 = all (default 16777216)\n"
         "  --policy NAME              roundrobin-v1 (default) | warmth-v1\n"
         "  --cost_model NAME          static-v1 (default) | learned-v1\n"
         "  --replay_from PATH         learn from this trace on start\n"
@@ -309,6 +313,14 @@ int main(int argc, char** argv) {
     const std::string node_token = cfg.get_str("node.token");
     const std::string nodes_path = cfg.get_str("nodes", "nodes.json");
     const std::string trace_path = cfg.get_str("trace", "trace.jsonl");
+    // A router that runs for months writes a trace that grows for months, and
+    // then replays all of it on every restart. Both are bounded here. The
+    // defaults are far above anything a benchmark produces (a campaign run is
+    // tens of kilobytes), so nothing in bench/ changes behaviour.
+    const uint64_t trace_max_bytes = static_cast<uint64_t>(
+        std::max(0.0, cfg.get_num("trace.max_bytes", 134217728.0)));   // 128 MiB
+    const uint64_t replay_tail_bytes = static_cast<uint64_t>(
+        std::max(0.0, cfg.get_num("replay.tail_bytes", 16777216.0)));  // 16 MiB
     const int poll_ms = static_cast<int>(cfg.get_u32("poll_ms", 1000));
     const int node_timeout_ms = static_cast<int>(cfg.get_u32("node.timeout_ms", 2000));
     const int request_timeout_ms =
@@ -351,7 +363,7 @@ int main(int argc, char** argv) {
     rf::TraceWriter trace;
     {
         std::string err;
-        if (!trace.open(trace_path, &err)) {
+        if (!trace.open(trace_path, &err, trace_max_bytes)) {
             std::fprintf(stderr, "%s\n", err.c_str());
             return 2;
         }
@@ -392,9 +404,15 @@ int main(int argc, char** argv) {
         rf::TraceReadStats stats;
         std::string read_err;
         const int64_t started = rf::mono_ms();
+        // Only the tail, and only when replaying the live trace. An operator
+        // who names a file with --replay_from is asking for that file, and a
+        // benchmark warm-up trace is small enough that the distinction never
+        // bites; silently reading half of what was asked for would.
+        const uint64_t tail =
+            replay_path == trace_path ? replay_tail_bytes : 0;
         if (rf::read_trace(replay_path,
                            [&state](const rf::TraceRecord& r) { state.replay(r); },
-                           &stats, &read_err)) {
+                           &stats, &read_err, tail)) {
             if (stats.parsed > 0)
                 RF_INFO("replayed %llu record(s) from %s into %s in %lld ms",
                         static_cast<unsigned long long>(stats.parsed),
@@ -606,6 +624,7 @@ int main(int argc, char** argv) {
         if (req.method == "GET" && req.path == "/admin/stats") {
             rf::Json j = state.stats_json();
             j["trace_path"] = rf::Json(trace.path());
+            j["trace_rotations"] = rf::Json(trace.rotations());
             j["trace_records_written"] = rf::Json(trace.records_written());
             j["trace_write_errors"] = rf::Json(trace.write_errors());
             j["placement"] = placement.stats_json();

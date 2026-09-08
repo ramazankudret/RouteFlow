@@ -302,6 +302,13 @@ struct TraceRecord {
 
     uint32_t inflight_at_dispatch = 0;
     uint32_t concurrent_decoders_at_dispatch = 0;
+    // How many replies were decoding on this node when *this* one started,
+    // counted at the first token rather than at dispatch. A burst of requests
+    // is dispatched before any of them has produced a token, so the dispatch
+    // sample is zero for all of them however hard they then contend -- which
+    // is the shape of the agent workload this router is built for (D44).
+    // 0 = the request never streamed a token, so nothing was observed.
+    uint32_t concurrent_decoders_at_first_token = 0;
     bool telemetry_ok_at_dispatch = false;
     float gpu_util_at_dispatch = 0.f;
     uint64_t vram_free_at_dispatch = 0;

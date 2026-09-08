@@ -74,7 +74,8 @@ public:
     // reservation so a concurrent request stops seeing it as pending.
     void note_load_done(NodeLedger::Token token);
     // Exclusive. First token seen: this request now contends for decode (D5).
-    void note_decoding(NodeLedger::Token token);
+    // Returns the number of decoders on that node including this one.
+    uint32_t note_decoding(NodeLedger::Token token);
 
     // Exclusive. Releases the reservation and feeds the cost model. Call once
     // per attempt, including failed ones.

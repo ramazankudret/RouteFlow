@@ -292,6 +292,10 @@ Json TraceRecord::to_json() const {
 
     j["inflight_at_dispatch"] = Json(inflight_at_dispatch);
     j["concurrent_decoders_at_dispatch"] = Json(concurrent_decoders_at_dispatch);
+    j["concurrent_decoders_at_first_token"] =
+        concurrent_decoders_at_first_token > 0
+            ? Json(concurrent_decoders_at_first_token)
+            : Json();
     j["gpu_util_at_dispatch"] = maybe_num(telemetry_ok_at_dispatch, gpu_util_at_dispatch);
     j["vram_free_at_dispatch"] =
         maybe_num(telemetry_ok_at_dispatch, static_cast<double>(vram_free_at_dispatch));
@@ -363,6 +367,8 @@ bool TraceRecord::from_json(const Json& j, TraceRecord& out, std::string* err) {
 
     out.inflight_at_dispatch = j["inflight_at_dispatch"].as_u32();
     out.concurrent_decoders_at_dispatch = j["concurrent_decoders_at_dispatch"].as_u32();
+    out.concurrent_decoders_at_first_token =
+        j["concurrent_decoders_at_first_token"].as_u32();
     out.telemetry_ok_at_dispatch = j["gpu_util_at_dispatch"].is_num();
     out.gpu_util_at_dispatch = static_cast<float>(j["gpu_util_at_dispatch"].as_num());
     out.vram_free_at_dispatch = j["vram_free_at_dispatch"].as_u64();

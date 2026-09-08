@@ -30,6 +30,11 @@ import time
 import urllib.error
 import urllib.request
 
+# The simulated cluster's two models. Overridable because this generator is the
+# only concurrent one in bench/, and until now it had only ever been pointed at
+# simulated nodes -- so T_queue, the contention alpha and the herd protection
+# (§6.2, §6.3, D4, D5) had never met a real engine, which has its own internal
+# queue and its own parallelism rather than a modelled one.
 PLANNER_MODEL = "planner:12b"
 WORKER_MODEL = "worker:3b"
 
@@ -219,7 +224,7 @@ def run_scenario(args):
         # The planner thinks first; the sub-agents fan out from its output. That
         # dependency is what makes the workload alternate models, which is what
         # puts a node with too little VRAM under eviction pressure.
-        planner = call(args.router, PLANNER_MODEL, "planner",
+        planner = call(args.router, args.planner_model, "planner",
                        rng.randint(900, 1500), rng.randint(110, 170),
                        args.token, args.timeout, rng, args.stream, args.capped)
         results.append(planner)
@@ -230,7 +235,7 @@ def run_scenario(args):
         jobs = [(rng.randint(300, 600), rng.randint(40, 90))
                 for _ in range(args.subagents)]
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.subagents) as pool:
-            futures = [pool.submit(call, args.router, WORKER_MODEL, "subagent",
+            futures = [pool.submit(call, args.router, args.worker_model, "subagent",
                                    prompt, output, args.token, args.timeout,
                                    random.Random(args.seed + round_index * 100 + i),
                                    args.stream, args.capped)
@@ -278,6 +283,11 @@ def main():
                              "learned output-length model is exercised at all")
     parser.set_defaults(stream=True, capped=True)
     parser.add_argument("--token", help="bearer token, if the router requires one")
+    parser.add_argument("--planner-model", default=PLANNER_MODEL,
+                        help="model for the planner leg (default: %(default)s)")
+    parser.add_argument("--worker-model", default=WORKER_MODEL,
+                        help="model for the concurrent sub-agents "
+                             "(default: %(default)s)")
     parser.add_argument("--label", default="", help="printed with the summary")
     args = parser.parse_args()
 

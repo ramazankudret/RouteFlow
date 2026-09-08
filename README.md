@@ -130,6 +130,7 @@ failure handling can actually be exercised:
 ```bash
 bench/real_cluster.sh up              # nodes on a Docker bridge, engine on loopback
 bench/real_cluster.sh faults          # partition, freeze, 300ms netem, kill, engine death
+bench/real_cluster.sh concurrency     # concurrent sub-agents against real engines
 bench/real_cluster.sh ratio gpu       # a second cluster shape: two comparable nodes
 bench/real_cluster.sh down
 ```
@@ -221,7 +222,8 @@ back to the node that had just failed, because an exclusion list was built and
 never handed over. `docs/DECISIONS.md` D36 through D42.
 
 That is the honest summary of the project's state: the four phases are closed
-with measured exit criteria, the premise is demonstrated on real engines and on
-a real network, and **nobody has run it but its author**. Every failure mode
+with measured exit criteria, the premise is demonstrated on real engines, on a
+real network and under concurrent load, and **nobody has run it but its
+author**. Every failure mode
 listed above is one a benchmark happened to walk into. The next one will be
 found by whoever points it at traffic that was not designed to test it.

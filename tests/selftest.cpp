@@ -496,6 +496,7 @@ void test_http() {
 
 }  // namespace
 
+
 int main() {
     rf::http::init_process();
     rf::log_set_level(rf::LogLevel::Warn);

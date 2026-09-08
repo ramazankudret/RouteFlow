@@ -37,7 +37,9 @@ Three distinct diagnostics for three distinct failures is worth more than it
 sounds. "Node unreachable" with no reason is the least useful line a scheduler
 can log, and this one says which of the three happened.
 
-All fourteen assertions pass. **One of them did not, and that is the result.**
+All fourteen pass today. **The fifth did not when it was first written, and
+that is the result** — it is the only one that reaches §6.4's retry branch on
+purpose, and it went straight into the bug below.
 
 ## D42: the retry went back to the node that had just failed
 
@@ -87,6 +89,42 @@ called it with the list. The regression test for the wiring is fault 5, and
 reverting the fix turns it red: `RETRIES total=3 moved=0 same_node=3`, three
 502s. Some bugs live between two correct components and only an integration
 test can see them.
+
+## Concurrency, against a real engine
+
+`bench/loadgen.py` has always driven concurrent sub-agents — a planner, then N
+of them at once — and had only ever been pointed at simulated nodes. So T_queue
+(§6.2), the contention term alpha (D5) and the ledger's protection against a
+herd all loading the same cold model (§6.3, D4) had never met an engine with a
+queue of its own.
+
+`bench/real_cluster.sh concurrency` points it at two real ones, with
+`OLLAMA_NUM_PARALLEL` and `engine_slots` above one so contention is possible at
+all. Six checks; each says what should be true, and reports **inconclusive**
+rather than passing when the workload never asked.
+
+| | |
+| --- | --- |
+| every request served | pass, 30 of 30 |
+| requests really overlapped at the router | pass |
+| the queue term fires on a busy node | pass |
+| contention that happened was recorded | **failed — see D44** |
+| a request arriving mid-load waits for it (D4) | inconclusive |
+| nothing admitted onto a node that could not serve it | pass |
+
+The fourth is D44, and it is the reason this harness exists: 16 pairs of replies
+genuinely decoded at the same time on one node, and not one record said so.
+`concurrent_decoders_at_dispatch` is sampled when the request is sent, and a
+burst is dispatched before anybody has a token. So every contended run was being
+taught to the cost model as an uncontended one — 257.5 tok/s alone against 111.2
+alongside, with 111 learned as the truth. Fixed by counting at the first token;
+the check passes now.
+
+The fifth stays inconclusive and should. Testing it needs a request that arrives
+*while* another is mid-load, and this workload dispatches its burst in a single
+millisecond, where pricing a full remaining load is correct. Staggering the
+generator to make the check go green would be inventing a workload to pass a
+test.
 
 ## The second cluster shape
 

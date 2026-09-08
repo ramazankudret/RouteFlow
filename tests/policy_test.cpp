@@ -11,6 +11,7 @@
 // the second wrong would not be a scheduler, it would be a warmth bias.
 
 #include <cmath>
+#include <fstream>
 #include <cstdlib>
 #include <cstdio>
 #include <string>
@@ -20,6 +21,7 @@
 #include "common/util.h"
 #include "agent/engine/residency_limit.h"
 #include "router/core/admission.h"
+#include "router/core/trace_writer.h"
 #include "router/core/interfaces.h"
 #include "router/core/ledger.h"
 
@@ -567,6 +569,115 @@ void test_exclusion_binds_even_when_the_node_would_win() {
           "one of them");
 }
 
+// The trace is append-only and unbounded, which is right for a benchmark run
+// and wrong for a router that stays up for months: the file grows forever and
+// every restart replays all of it (D43).
+void test_trace_rotation_and_tail() {
+    section("trace rotation and bounded replay (D43)");
+
+    const std::string path = "rf_rotate_test.jsonl";
+    const std::string prev = path + ".1";
+    std::remove(path.c_str());
+    std::remove(prev.c_str());
+
+    auto record = [](int i) {
+        rf::TraceRecord r;
+        r.job_id = "job-" + std::to_string(i);
+        r.model = "m";
+        r.node_id = "n";
+        r.outcome = rf::Outcome::Ok;
+        r.total_ms = i;
+        return r;
+    };
+
+    // One record, to learn how big one is, so the budget below is expressed in
+    // records rather than in a guess about bytes.
+    {
+        rf::TraceWriter w;
+        std::string err;
+        check(w.open(path, &err, 0), "a writer opens with rotation disabled");
+        w.append(record(0));
+    }
+    std::ifstream sizer(path, std::ios::binary | std::ios::ate);
+    const uint64_t one = static_cast<uint64_t>(sizer.tellg());
+    sizer.close();
+    check(one > 0, "and writes something");
+    std::remove(path.c_str());
+
+    {
+        rf::TraceWriter w;
+        std::string err;
+        // Room for about ten records before the eleventh has to rotate.
+        check(w.open(path, &err, one * 10), "a writer opens with a byte budget");
+        for (int i = 0; i < 25; ++i) w.append(record(i));
+        check(w.rotations() >= 1, "which rotates once the budget is reached");
+        check(w.records_written() == 25,
+              "and no record is dropped in the process");
+    }
+
+    std::ifstream live(path, std::ios::binary | std::ios::ate);
+    check(static_cast<uint64_t>(live.tellg()) <= one * 10,
+          "the live file stays inside its budget");
+    live.close();
+
+    {
+        std::ifstream old(prev, std::ios::binary);
+        check(old.good(), "and the previous generation is kept, not deleted");
+    }
+
+    // Every surviving record still parses, in both files: rotation must not
+    // corrupt the seam or leave a half-written line.
+    //
+    // It does lose the oldest records, and that is the whole point rather than
+    // a defect: twenty-five records through a ten-record budget rotates twice,
+    // and the second rotation replaces the first `.1`. Bounded disk means
+    // discarding something, and what it discards is the half an EWMA with a
+    // twenty-sample half-life has already forgotten.
+    uint64_t total = 0;
+    double oldest = 1e9, newest = -1;
+    uint64_t parse_errors = 0;
+    std::string err;
+    for (const std::string& f : {prev, path}) {
+        rf::TraceReadStats one_file;
+        rf::read_trace(f, [&](const rf::TraceRecord& r) {
+            ++total;
+            oldest = std::min(oldest, r.total_ms);
+            newest = std::max(newest, r.total_ms);
+        }, &one_file, &err);
+        parse_errors += one_file.parse_errors;
+    }
+    check(parse_errors == 0, "no record is split across the rotation");
+    check(newest == 24, "the newest record always survives");
+    check(oldest > 0, "and the oldest is the one dropped, not the newest");
+    check(total > 0 && total < 25,
+          "so a bounded trace holds a bounded window, not everything");
+
+    // The tail read: fewer records, no parse errors from the seam, and the
+    // *last* ones rather than the first.
+    rf::TraceReadStats full, tail;
+    std::vector<double> tail_ids;
+    rf::read_trace(path, nullptr, &full, &err, 0);
+    rf::read_trace(path,
+                   [&tail_ids](const rf::TraceRecord& r) { tail_ids.push_back(r.total_ms); },
+                   &tail, &err, one * 3);
+    check(tail.parsed > 0 && tail.parsed < full.parsed,
+          "a tail read returns some records but not all of them");
+    check(tail.parse_errors == 0,
+          "and the partial line at the seam is dropped, not counted as corrupt");
+    check(!tail_ids.empty() && tail_ids.back() == 24,
+          "the tail is the newest records, which is the only half worth "
+          "replaying into an EWMA");
+
+    // A budget larger than the file is not an error and must not truncate.
+    rf::TraceReadStats big;
+    rf::read_trace(path, nullptr, &big, &err, one * 10000);
+    check(big.parsed == full.parsed,
+          "a tail larger than the file reads the whole file");
+
+    std::remove(path.c_str());
+    std::remove(prev.c_str());
+}
+
 void test_warmth_beats_idle_power() {
     section("warm weak node vs idle strong node (§1)");
 
@@ -852,6 +963,73 @@ rf::TraceRecord make_record(const std::string& node, const std::string& model,
 }
 
 }  // namespace
+
+// Contention is counted when decoding starts, not when the request is sent
+// (D44). A burst of requests is dispatched before any of them has produced a
+// token, so the dispatch sample reads zero for every one of them however hard
+// they then contend -- and each contended run is then taught to the model as
+// an uncontended one.
+void test_contention_counted_at_first_token() {
+    section("contention is counted when decoding begins (D44)");
+
+    {
+        rf::NodeLedger ledger;
+        const int64_t now = rf::now_ms();
+        const rf::NodeLedger::Token a = ledger.reserve("n", "m", 0, false, 0, now);
+        const rf::NodeLedger::Token b = ledger.reserve("n", "m", 0, false, 0, now);
+        const rf::NodeLedger::Token c = ledger.reserve("n", "m", 0, false, 0, now);
+        check(a != rf::NodeLedger::kInvalid, "the ledger admits three requests");
+        check(ledger.note_decoding(a) == 1,
+              "the first to produce a token is alone");
+        check(ledger.note_decoding(b) == 2,
+              "the second sees the first, at the moment it can");
+        check(ledger.note_decoding(c) == 3, "and the third sees both");
+        check(ledger.note_decoding(b) == 3,
+              "a repeated first token does not double-count the same request");
+        ledger.release(a);
+        check(ledger.note_decoding(c) == 2,
+              "and the count follows the ledger as requests finish");
+    }
+
+    // What the cost model does with it: a contended record must teach alpha,
+    // never the base decode rate.
+    const rf::ScoringConfig scoring = bench_scoring();
+    const auto cluster = make_cluster();
+    const rf::NodeState& jetson = cluster[1];
+    rf::EmptyLedger ledger;
+    const rf::EvictionPlan none;
+    const auto req = planner_request(200);
+
+    auto rate_after = [&](uint32_t at_dispatch, uint32_t at_first_token) {
+        auto m = rf::make_learned_cost_model(scoring);
+        for (int i = 0; i < 30; ++i) {
+            // 200 tokens in 2000 ms: 0.1 tok/ms, half the fixture's warm rate.
+            rf::TraceRecord r = make_record("sim-jetson", "planner:12b", true,
+                                            1200, 200, 400, 2000, at_dispatch);
+            r.concurrent_decoders_at_first_token = at_first_token;
+            m->observe(r);
+        }
+        return m->estimate(req, jetson, ledger, none, rf::now_ms()).t_decode_ms;
+    };
+
+    // The shape a burst produces today: dispatch says nobody, first token says
+    // four. Against the shape where the router had been told at dispatch.
+    const double blind = rate_after(0, 0);
+    const double honest = rate_after(0, 4);
+    const double told_at_dispatch = rate_after(4, 0);
+
+    check(std::fabs(honest - told_at_dispatch) < honest * 0.05,
+          "a run marked contended at the first token is treated exactly like "
+          "one that was contended at dispatch");
+    // 200 tokens over 2000 ms is 0.1 tok/ms. Unnoticed, that becomes the base
+    // rate, and the model then predicts precisely the contended speed it was
+    // shown as though it were the uncontended one -- which is the defect,
+    // stated as a number rather than as a worry.
+    check(std::fabs(blind - 2000.0) < 200.0,
+          "unnoticed contention is adopted as the uncontended decode rate");
+    check(std::fabs(honest - blind) > blind * 0.5,
+          "and noticing it keeps that sample out of the base rate entirely");
+}
 
 void test_learned_cost_model() {
     section("learned cost model (§8, Phase 2)");
@@ -1147,6 +1325,8 @@ int main() {
     test_admission_trusts_its_own_completion();
     test_residency_limit();
     test_exclusion_binds_even_when_the_node_would_win();
+    test_trace_rotation_and_tail();
+    test_contention_counted_at_first_token();
     test_warmth_beats_idle_power();
     test_ledger_prevents_duplicate_loads();
     test_queue_and_contention();

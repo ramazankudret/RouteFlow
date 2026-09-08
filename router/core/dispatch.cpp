@@ -29,6 +29,7 @@ struct AttemptResult {
     uint32_t output_tokens = 0;
     bool has_load_ms = false;
     double load_ms = 0;
+    uint32_t decoders_at_first_token = 0;
 };
 
 // Engines report their counters in the LAST frame of a stream, or in the body
@@ -241,7 +242,7 @@ void Dispatcher::handle(const http::Request& client_req, http::Responder& res) {
                 // The request now contends for decode throughput, which is the
                 // distinction §6.2 prices. Also release the VRAM reservation:
                 // if the model needed loading, it is loaded by now.
-                state_.note_decoding(r.token);
+                a.decoders_at_first_token = state_.note_decoding(r.token);
                 if (r.will_load) state_.note_load_done(r.token);
             }
             tail.append(data, n);
@@ -340,6 +341,7 @@ void Dispatcher::handle(const http::Request& client_req, http::Responder& res) {
 
         rec.inflight_at_dispatch = r.inflight_at_dispatch;
         rec.concurrent_decoders_at_dispatch = r.concurrent_decoders_at_dispatch;
+        rec.concurrent_decoders_at_first_token = a.decoders_at_first_token;
         rec.telemetry_ok_at_dispatch = r.telemetry_ok;
         rec.gpu_util_at_dispatch = r.gpu_util;
         rec.vram_free_at_dispatch = r.vram_free;

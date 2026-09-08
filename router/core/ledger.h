@@ -42,7 +42,10 @@ public:
 
     // First token seen. Until this point the request is not yet contending for
     // decode throughput, which is the distinction §6.2 prices.
-    void note_decoding(Token token);
+    // Returns how many requests are decoding on that node once this one is
+    // counted -- which is the number §6.2's contention term needs, observed at
+    // the only moment it is true (D44).
+    uint32_t note_decoding(Token token);
 
     void release(Token token);
 

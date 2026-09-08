@@ -1161,3 +1161,66 @@ live between two correct components, and only an integration test sees them.
 
 Full write-up, including the four other faults and the second cluster shape, in
 `docs/CLUSTER-RESULTS.md`.
+
+### D43 — The trace grows forever and every restart replays all of it · Settled
+
+Append-only with no rotation and no bound, and `--replay_from` defaults to the
+trace itself, so `read_trace` fed the whole file to the cost model on every
+start. Fine for a benchmark run of thirty kilobytes. For a router that stays up
+for months it is a file that grows without limit and a startup that gets slower
+every time — the kind of thing that works for a week and fails in month three.
+
+Both are bounded now, and the numbers come from what the model actually needs
+rather than from taste. The cost model is a set of EWMAs over a twenty-sample
+half-life, so a month of records teaches it nothing a few thousand did not.
+
+- `--trace.max_bytes` (default 128 MiB): at the limit the file is *renamed* to
+  `<path>.1` and a fresh one started. Rename rather than truncate, so a reader
+  part-way through keeps a valid file and the previous generation stays on
+  disk. Disk use is bounded at twice the limit.
+- `--replay.tail_bytes` (default 16 MiB): the restart reads only the end of the
+  trace, discarding the partial line at the seam. It applies only when
+  replaying the live trace — an operator who names a file with `--replay_from`
+  is asking for *that file*, and silently reading half of it would be worse
+  than reading all of it slowly.
+
+Rotation does discard the oldest records, and that is the trade rather than a
+defect: a bounded file means dropping something, and what it drops is the half
+an EWMA has already forgotten. The test says so explicitly, because the first
+version of it asserted that all twenty-five records survived a ten-record
+budget — which is not what rotation is.
+
+### D44 — Contention counted at dispatch is contention never counted · Settled
+
+`bench/loadgen.py` has always driven concurrent sub-agents and had always been
+pointed at simulated nodes. Pointed at two real engines for the first time, the
+trace says:
+
+- **16 pairs of replies genuinely decoded at the same time on one node.**
+- **0 records reported more than one decoder.**
+
+`concurrent_decoders_at_dispatch` is sampled when the request is *sent*. A burst
+is dispatched before any member has produced a token, so every member reads
+zero — and the agent workload this router exists for is a burst: a planner
+fanning out to N sub-agents at once.
+
+The consequence is worse than a term that fails to learn. §6.2 routes contended
+records to alpha and uncontended ones to the base decode rate; with the count
+reading zero, **every contended run was taught to the model as the uncontended
+one**. Measured on the GPU node: 257.5 tok/s decoding alone, 111.2 tok/s
+alongside another — contention costs 57% of decode speed, and 111 was being
+learned as the truth.
+
+The fix is to count at the only moment the number is true. `note_decoding` is
+already called at the first token; it now returns the decoder count, dispatch
+records it, and the cost model prefers it. `concurrent_decoders_at_first_token`
+is a new field rather than a redefinition of the old one, because the trace
+format is a contract and an old record still means what it said (schema rule 3).
+
+**Not covered by a unit test, and the test says so.** Reverting the dispatcher's
+one line leaves all 132 checks green: the ledger is right, the cost model is
+right, and nothing joins them. The regression test is
+`bench/real_cluster.sh concurrency`, where the check goes from "16 pairs
+overlapped, 0 recorded" to passing. Second time this session that a defect lived
+between two correct components (D42 was the first), and second time only an
+integration test could see it.
