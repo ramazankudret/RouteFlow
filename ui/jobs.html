@@ -41,6 +41,15 @@ a:hover{color:#6ff0a4}
 .stage{position:relative;z-index:1;height:calc(100vh - 52px);min-height:680px}
 .canvas{position:absolute;inset:0}
 .canvas.is-dim{opacity:.3}
+/* Nothing on the stage is text anyone copies, and dragging a device across
+   it used to sweep up every label it passed -- leaving the canvas full of
+   blue selection, and Chrome offering to translate it. The panels outside
+   the canvas stay selectable. */
+.canvas,.canvas *{-webkit-user-select:none;user-select:none}
+/* And while a drag is running the pointer may leave the canvas entirely,
+   because it is captured. For as long as that lasts, nothing anywhere
+   selects. */
+html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-select:none !important}
 .links{position:absolute;inset:0;width:100%;height:100%}
 .link{fill:none;stroke-width:1.4;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .link.is-warm{stroke:var(--live);opacity:.75;animation:rf-pulse 3.8s ease-in-out infinite}
@@ -544,6 +553,10 @@ a:hover{color:#6ff0a4}
   }
   var drag = null;
   canvas.addEventListener('pointerdown', function (e) {
+    // Before anything else: the browser's own reaction to a press-and-move on
+    // text is to select it, and that happens whatever CSS says afterwards.
+    e.preventDefault();
+    document.documentElement.classList.add('rf-dragging');
     var n = e.target.closest('.node');
     if (n) {
       drag = { el: n, sx: e.clientX, sy: e.clientY, l: parseFloat(n.style.left), t: parseFloat(n.style.top), moved: false };
@@ -574,6 +587,7 @@ a:hover{color:#6ff0a4}
     relink();
   });
   function end() {
+    document.documentElement.classList.remove('rf-dragging');
     if (!drag) return;
     if (drag.el) drag.el.classList.remove('is-drag');
     if (drag.moved) { world.setAttribute('data-dragged', '1'); world.setAttribute('data-touched', '1'); }
