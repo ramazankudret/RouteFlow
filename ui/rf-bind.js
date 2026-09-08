@@ -1538,7 +1538,24 @@
             unknown && !warm ? 'residency unknown' : warm + ' warm');
   }
 
+  // Each screen ends with a block the design calls "state reference -- static
+  // markup, not live": a legend naming the fixture's nodes, and a card showing
+  // what the empty state looks like. It is documentation of the design, and it
+  // is worth keeping in the file.
+  //
+  // It is not worth showing to an operator. On a live console it names machines
+  // that do not exist and displays "No nodes registered" beside a header
+  // reporting three of them -- the panel contradicting itself. On the cluster
+  // screen it used to be removed by accident, because rendering the inspector
+  // cleared the whole column first; giving each node its own panel stopped that
+  // clearing and left the reference sitting above the live data.
+  function hideDesignReference() {
+    var blocks = document.querySelectorAll('.p-foot, .d-foot, .feed-foot, .a-foot');
+    for (var i = 0; i < blocks.length; i++) blocks[i].hidden = true;
+  }
+
   function repaint() {
+    hideDesignReference();
     renderHeader();
     renderWorldCards();
     if (document.getElementById('rf-world')) {
