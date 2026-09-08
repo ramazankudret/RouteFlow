@@ -190,6 +190,11 @@ a:hover{color:#6ff0a4}
 .boot{position:absolute;inset:0;z-index:6;pointer-events:none;background:linear-gradient(90deg,rgba(5,7,10,0) 0%,rgba(51,224,122,.11) 46%,rgba(51,224,122,.5) 50%,rgba(51,224,122,.11) 54%,rgba(5,7,10,0) 100%);animation:rf-boot 1.15s ease-out 1 forwards}
 @keyframes rf-boot{from{transform:translateX(-100%)}to{transform:translateX(100%);opacity:0}}
 .node{animation:rf-in .5s ease-out both;animation-delay:calc(var(--i,0)*.09s + .12s)}
+/* The entrance runs once. Without this, any class change that toggles
+   `animation` -- is-drag going on and off around a click -- replays it,
+   and `both` holds opacity 0 through the delay, so the device blinks out
+   and fades back every time you touch it. */
+.node.is-settled{animation:none}
 @keyframes rf-in{from{opacity:0;transform:translate(-50%,-46%)}to{opacity:1;transform:translate(-50%,-50%)}}
 .node.is-drag,.node.is-mute{animation:none}
 .links{animation:rf-fade .9s ease-out .5s both}
@@ -731,7 +736,24 @@ a:hover{color:#6ff0a4}
     var m = points();
     Array.prototype.forEach.call(svg.querySelectorAll('path'), function (p) {
       var a = m[p.getAttribute('data-a')], b = m[p.getAttribute('data-b')];
-      if (a && b) p.setAttribute('d', d(a, b));
+      // A path whose endpoints are not both on the canvas used to be left
+      // exactly as the designer drew it, which is how a curve came to hang in
+      // empty space. It is hidden until both ends exist again.
+      if (a && b) {
+        p.setAttribute('d', d(a, b));
+        p.removeAttribute('hidden');
+      } else {
+        p.setAttribute('hidden', 'hidden');
+      }
+    });
+  }
+  // The binding layer adds, moves and removes cards on its own schedule, so
+  // the curves have to be redrawn when the canvas changes rather than only
+  // when a pointer does.
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(function () { relink(); }).observe(world, {
+      childList: true, subtree: true, attributes: true,
+      attributeFilter: ['style', 'data-node', 'data-b']
     });
   }
   var drag = null;
@@ -768,7 +790,13 @@ a:hover{color:#6ff0a4}
   function end() {
     if (!drag) return;
     if (drag.el) drag.el.classList.remove('is-drag');
-    if (drag.moved) { world.setAttribute('data-dragged', '1'); world.setAttribute('data-touched', '1'); }
+    if (drag.moved) {
+      world.setAttribute('data-dragged', '1');
+      world.setAttribute('data-touched', '1');
+      // Tells the binding layer this card has been placed by hand, so it stops
+      // recomputing a slot position for it on every poll.
+      if (drag.el) drag.el.setAttribute('data-moved', '1');
+    }
     canvas.classList.remove('is-panning');
     drag = null;
   }

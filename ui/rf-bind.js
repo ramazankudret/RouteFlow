@@ -293,6 +293,46 @@
       return;
     }
 
+    // The design ships one hub link per fixture node, addressed by the
+    // fixture's id. Live nodes have different ids, so every link was an orphan:
+    // relink() leaves a path alone when it cannot resolve both ends, and the
+    // curves stayed frozen at the designer's coordinates -- three of them
+    // happening to land near a card, and two reaching out into empty space
+    // with nothing on the end. Re-address them by slot, and hide the surplus.
+    var links = world.querySelectorAll('.links path[data-b]');
+    var perNode = {};
+    for (var li = 0; li < links.length; li++) {
+      var key = links[li].getAttribute('data-a') + '|' + li;
+      if (links[li].getAttribute('data-a') !== 'hub') continue;
+      perNode[key] = links[li];
+    }
+    var hubLinks = [];
+    for (var lj = 0; lj < links.length; lj++) {
+      if (links[lj].getAttribute('data-a') === 'hub') hubLinks.push(links[lj]);
+    }
+    // Paths come in layers -- link, link-glow, link-flow -- so there are
+    // several per slot. Group them in document order and hand each group the
+    // node that occupies that slot.
+    var perSlot = {};
+    hubLinks.forEach(function (p) {
+      var b = p.getAttribute('data-b');
+      (perSlot[b] = perSlot[b] || []).push(p);
+    });
+    var slotIds = Object.keys(perSlot);
+    slotIds.forEach(function (slotId, slotIndex) {
+      var target = nodes[slotIndex];
+      perSlot[slotId].forEach(function (p) {
+        if (target) {
+          p.setAttribute('data-b', target.id);
+          p.removeAttribute('hidden');
+        } else {
+          // No node for this slot. Hidden rather than removed: a node can come
+          // back, and the design's layer order should survive it leaving.
+          p.setAttribute('hidden', 'hidden');
+        }
+      });
+    });
+
     nodes.forEach(function (node, index) {
       var card = world.querySelector('.node[data-node="' + node.id + '"]');
       if (!card) {
@@ -301,12 +341,34 @@
         card.setAttribute('data-node', node.id);
         card.style.setProperty('--i', String(index));
         world.appendChild(card);
+        // The entrance animation is a one-time arrival. Marking the card when
+        // it finishes stops any later class change from replaying it -- see
+        // .is-settled in cluster.html. The timeout is the fallback for a
+        // browser that never fires the event, or reduced-motion turning the
+        // animation off entirely.
+        (function (el) {
+          var settle = function () { el.classList.add('is-settled'); };
+          el.addEventListener('animationend', settle, { once: true });
+          setTimeout(settle, 1200);
+        })(card);
       }
-      // Recomputed each pass because the fallback ring depends on how many
-      // nodes there are, and that changes when one joins or leaves.
-      var pos = slotFor(index, nodes.length);
-      card.style.left = pos.left;
-      card.style.top = pos.top;
+      // Where a card sits belongs to whoever put it there. This used to be
+      // rewritten on every pass, so a card dragged across the canvas snapped
+      // back to its slot on the next poll -- the devices could not be moved at
+      // all, they just appeared to be until the timer caught up.
+      //
+      // The ring does depend on how many nodes there are, so a card that
+      // nobody has moved is still repositioned when that count changes. One
+      // that has been dragged is left alone for good; cluster.html marks it
+      // when a drag actually moves it, as opposed to a click that does not.
+      var moved = card.getAttribute('data-moved') === '1';
+      var placed = card.getAttribute('data-placed-for');
+      if (!moved && placed !== String(nodes.length)) {
+        var pos = slotFor(index, nodes.length);
+        card.style.left = pos.left;
+        card.style.top = pos.top;
+        card.setAttribute('data-placed-for', String(nodes.length));
+      }
 
       fillNodeCommon(card, node);
 
