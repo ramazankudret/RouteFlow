@@ -467,10 +467,13 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
 (function () {
   var feed = document.getElementById('rf-feed');
   var canvas = document.getElementById('rf-canvas');
-  var links = canvas.querySelectorAll('[data-rf-link]');
-  var glows = canvas.querySelectorAll('.link-glow');
-  var nodes = canvas.querySelectorAll('[data-node]');
+  // Queried at call time. These were captured once at load, when the canvas
+  // still held the design's fixture cards and paths; the binding layer replaces
+  // them, so every list was pointing at elements that had left the document.
   function light(id) {
+    var links = canvas.querySelectorAll('[data-rf-link]');
+    var glows = canvas.querySelectorAll('.link-glow');
+    var nodes = canvas.querySelectorAll('.node[data-node]');
     Array.prototype.forEach.call(links, function (p) {
       var on = p.getAttribute('data-rf-link') === id || p.getAttribute('data-rf-link') === 'client';
       p.classList.toggle('is-lit', on && id !== '');
@@ -493,7 +496,15 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
       if (href) window.location.href = href;
     }
   });
-  light(feed.querySelector('.jrow.is-selected').getAttribute('data-node'));
+  function relight() {
+    var sel = feed.querySelector('.jrow.is-selected');
+    // No selection is a legitimate state -- an empty feed, or a fresh page --
+    // and dereferencing it threw, which stopped the whole script.
+    light(sel ? (sel.getAttribute('data-node') || '') : '');
+  }
+  // The feed is rebuilt on every poll; the lighting has to follow it.
+  feed.addEventListener('rf-feed-rendered', relight);
+  relight();
 })();
 </script>
 <template id="rf-tpl-node">
@@ -658,9 +669,9 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
 (function () {
   var canvas = document.getElementById('rf-canvas');
   if (!canvas) return;
-  var links = canvas.querySelectorAll('[data-rf-link]');
-  var nodes = canvas.querySelectorAll('.node');
+  // Live, not cached: the cards these looked at are replaced at runtime.
   function setFocus(id) {
+    var nodes = canvas.querySelectorAll('.node');
     canvas.classList.toggle('is-focusing', !!id);
     Array.prototype.forEach.call(nodes, function (n) {
       var k = n.getAttribute('data-node') || (n.getAttribute('data-rf-item') === 'hub' ? 'hub' : 'clients');
@@ -678,8 +689,9 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
   canvas.addEventListener('pointerout', function (e) {
     if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('.node[data-node]')) setFocus(null);
   });
-  var order = [];
-  Array.prototype.forEach.call(canvas.querySelectorAll('.node[data-node]'), function (n) { order.push(n); });
+  function focusOrder() {
+    return Array.prototype.slice.call(canvas.querySelectorAll('.node[data-node]'));
+  }
   var cur = -1;
   document.addEventListener('keydown', function (e) {
     if (e.target && /input|textarea/i.test(e.target.tagName)) return;
@@ -688,6 +700,8 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
     if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') d = -1;
     if (!d) return;
     e.preventDefault();
+    var order = focusOrder();
+    if (!order.length) return;
     cur = (cur + d + order.length) % order.length;
     var n = order[cur];
     setFocus(n.getAttribute('data-node'));

@@ -826,9 +826,9 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
 (function () {
   var canvas = document.getElementById('rf-canvas');
   if (!canvas) return;
-  var links = canvas.querySelectorAll('[data-rf-link]');
-  var nodes = canvas.querySelectorAll('.node');
+  // Live, not cached: these cards are replaced at runtime by the binding layer.
   function setFocus(id) {
+    var nodes = canvas.querySelectorAll('.node');
     canvas.classList.toggle('is-focusing', !!id);
     Array.prototype.forEach.call(nodes, function (n) {
       var k = n.getAttribute('data-node') || (n.getAttribute('data-rf-item') === 'hub' ? 'hub' : 'clients');
@@ -846,8 +846,9 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
   canvas.addEventListener('pointerout', function (e) {
     if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('.node[data-node]')) setFocus(null);
   });
-  var order = [];
-  Array.prototype.forEach.call(canvas.querySelectorAll('.node[data-node]'), function (n) { order.push(n); });
+  function focusOrder() {
+    return Array.prototype.slice.call(canvas.querySelectorAll('.node[data-node]'));
+  }
   var cur = -1;
   document.addEventListener('keydown', function (e) {
     if (e.target && /input|textarea/i.test(e.target.tagName)) return;
@@ -856,6 +857,8 @@ html.rf-dragging,html.rf-dragging *{-webkit-user-select:none !important;user-sel
     if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') d = -1;
     if (!d) return;
     e.preventDefault();
+    var order = focusOrder();
+    if (!order.length) return;
     cur = (cur + d + order.length) % order.length;
     var n = order[cur];
     setFocus(n.getAttribute('data-node'));

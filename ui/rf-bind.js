@@ -517,6 +517,11 @@
   function renderJobs(jobs) {
     var feed = document.getElementById('rf-feed');
     if (!feed) return;
+    // The feed is rebuilt from scratch each poll, so whatever the operator had
+    // selected has to be carried across it -- otherwise the route they lit on
+    // the canvas goes out two seconds later, on its own.
+    var wasSelected = feed.querySelector('.jrow.is-selected');
+    var selectedJob = wasSelected ? wasSelected.getAttribute('data-job') : null;
     clear(feed);
     if (!jobs.length) {
       showEmpty(feed, 'rf-tpl-empty-jobs');
@@ -540,8 +545,16 @@
       row.classList.toggle('is-warm', job.was_resident === true);
       row.classList.toggle('is-cold', job.was_resident === false);
       row.classList.toggle('is-failed', job.outcome !== 'ok');
+      // The page lights this job's path across the canvas from the node it was
+      // dispatched to. The fixture rows carried it; the live ones did not, so
+      // the handler read null and lit nothing.
+      if (job.node_id) row.setAttribute('data-node', job.node_id);
+      if (selectedJob && job.job_id === selectedJob) row.classList.add('is-selected');
       feed.appendChild(row);
     });
+    // Tell the page the feed changed, so it can put the lighting back on the
+    // row that is still selected. Nothing listens on the other screens.
+    feed.dispatchEvent(new CustomEvent('rf-feed-rendered', { bubbles: true }));
   }
 
   // --- decision -------------------------------------------------------------
