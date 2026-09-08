@@ -324,11 +324,15 @@
       perSlot[slotId].forEach(function (p) {
         if (target) {
           p.setAttribute('data-b', target.id);
-          p.removeAttribute('hidden');
+          p.style.display = '';
         } else {
           // No node for this slot. Hidden rather than removed: a node can come
           // back, and the design's layer order should survive it leaving.
-          p.setAttribute('hidden', 'hidden');
+          //
+          // display, not the `hidden` attribute: `hidden` is an HTML global and
+          // an SVG path ignores it, so the first version of this left the curve
+          // on screen while the DOM reported it hidden.
+          p.style.display = 'none';
         }
       });
     });
@@ -1505,6 +1509,15 @@
     setHook(document, 'engines_up', up);
     setHook(document, 'warm_total', unknown && !warm ? null : warm);
     setHook(document, 'inflight_total', inflight);
+
+    // The hub card on the canvas carried the design's own numbers -- "5 nodes,
+    // 4 up, 3 warm" -- with no hook on them, so the picture contradicted the
+    // header directly above it on a three-node cluster.
+    setHook(document, 'hub_nodes',
+            state.nodes.length + ' node' + (state.nodes.length === 1 ? '' : 's'));
+    setHook(document, 'hub_up', up + ' up');
+    setHook(document, 'hub_warm',
+            unknown && !warm ? 'residency unknown' : warm + ' warm');
   }
 
   function repaint() {

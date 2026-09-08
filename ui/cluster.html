@@ -41,6 +41,10 @@ a:hover{color:#6ff0a4}
 .stage{position:relative;z-index:1;height:calc(100vh - 52px);min-height:680px}
 .canvas{position:absolute;inset:0}
 .canvas.is-dim{opacity:.3}
+/* Dragging a device across the canvas swept up every label it passed and
+   left the stage full of blue selection. Nothing here is text anyone
+   copies; the panel on the right is, and is left selectable. */
+.canvas,.canvas *{-webkit-user-select:none;user-select:none}
 .links{position:absolute;inset:0;width:100%;height:100%}
 .link{fill:none;stroke-width:1.4;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .link.is-warm{stroke:var(--live);opacity:.75;animation:rf-pulse 3.8s ease-in-out infinite}
@@ -251,7 +255,7 @@ a:hover{color:#6ff0a4}
         <span class="dev"><svg width="56" height="46" viewBox="0 0 56 46" aria-hidden="true"><rect x="8" y="24" width="40" height="13" rx="6.5"></rect><line x1="18" y1="24" x2="13" y2="8"></line><line x1="38" y1="24" x2="43" y2="8"></line><circle cx="19" cy="30.5" r="1.6"></circle><circle cx="28" cy="30.5" r="1.6"></circle><circle cx="37" cy="30.5" r="1.6"></circle></svg></span>
         <span class="node-id">routeflow</span>
         <span class="node-sub" data-rf="router_endpoint">localhost:11500 · scheduler</span>
-        <span class="node-tel"><span>5 nodes</span><span>4 up</span><span>3 warm</span></span>
+        <span class="node-tel"><span data-rf="hub_nodes">5 nodes</span><span data-rf="hub_up">4 up</span><span data-rf="hub_warm">3 warm</span></span>
       </div>
       <div class="node  is-selected" data-rf-item="node" data-node="desktop-01" style="left:14.24%;top:17.11%;--i:0">
         <span class="dev"><span class="dev-lvl" style="--vram:55%" aria-hidden="true"></span><span class="heat" style="color:#2f8f63;--heat-ms:4.6s" aria-hidden="true"></span><span class="shock" aria-hidden="true"></span><span class="shock s2" aria-hidden="true"></span><svg width="46" height="62" viewBox="0 0 46 62" aria-hidden="true"><rect x="12" y="4" width="22" height="54" rx="2"></rect><line x1="17" y1="12" x2="29" y2="12"></line><line x1="17" y1="17" x2="29" y2="17"></line><line x1="17" y1="22" x2="29" y2="22"></line><circle cx="23" cy="50" r="2.5"></circle></svg></span>
@@ -741,9 +745,10 @@ a:hover{color:#6ff0a4}
       // empty space. It is hidden until both ends exist again.
       if (a && b) {
         p.setAttribute('d', d(a, b));
-        p.removeAttribute('hidden');
+        p.style.display = '';
       } else {
-        p.setAttribute('hidden', 'hidden');
+        // display, not `hidden`: SVG ignores the HTML attribute.
+        p.style.display = 'none';
       }
     });
   }
