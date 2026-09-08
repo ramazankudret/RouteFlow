@@ -324,6 +324,11 @@
       perSlot[slotId].forEach(function (p) {
         if (target) {
           p.setAttribute('data-b', target.id);
+          // The focus effect matches on this one, and it also shipped with the
+          // fixture's id, so hovering a device dimmed its own link too.
+          if (p.hasAttribute('data-rf-link')) {
+            p.setAttribute('data-rf-link', target.id);
+          }
           p.style.display = '';
         } else {
           // No node for this slot. Hidden rather than removed: a node can come
