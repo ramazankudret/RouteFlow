@@ -337,13 +337,63 @@
     });
   }
 
-  function renderInspector(node) {
+  // The page's click handler shows the panel whose data-insp matches the node
+  // and hides the rest, so there has to be one panel per node. This rendered
+  // only the first one, which meant clicking any other node hid the single
+  // panel and left the inspector blank until the next poll rebuilt it -- a
+  // console that blinks out when you use it.
+  //
+  // Panels are created once and updated in place afterwards, for the same
+  // reason the cards above are: a rebuild restarts the entrance animation and
+  // throws away which node the operator had selected.
+  function renderInspectors(nodes) {
     var host = document.getElementById('rf-insp');
-    if (!host || !node) return;
-    var panel = clone('rf-tpl-node-inspector');
-    if (!panel) return;
+    if (!host || !document.getElementById('rf-tpl-node-inspector')) return;
 
-    panel.setAttribute('data-insp', node.id);
+    var seen = {};
+    nodes.forEach(function (n) { seen[n.id] = true; });
+
+    var existing = host.querySelectorAll('[data-insp]');
+    var byId = {};
+    for (var i = 0; i < existing.length; i++) {
+      var id = existing[i].getAttribute('data-insp');
+      // A fixture panel from the static markup names a node that is not in the
+      // registry; it goes, along with any node that has actually left.
+      if (!seen[id]) { existing[i].remove(); continue; }
+      byId[id] = existing[i];
+    }
+
+    nodes.forEach(function (n) {
+      var panel = byId[n.id];
+      if (!panel) {
+        panel = clone('rf-tpl-node-inspector');
+        if (!panel) return;
+        panel.setAttribute('data-insp', n.id);
+        panel.hidden = true;   // the selection below decides what is shown
+        host.appendChild(panel);
+      }
+      fillInspector(panel, n);
+    });
+
+    // Something must be visible. If the operator has not chosen, or the node
+    // they chose has gone, fall back to the first -- but never override a
+    // choice that is still valid, which is what made the click flicker.
+    var panels = host.querySelectorAll('[data-insp]');
+    var anyVisible = false;
+    for (var k = 0; k < panels.length; k++) if (!panels[k].hidden) anyVisible = true;
+    if (!anyVisible && panels.length) {
+      panels[0].hidden = false;
+      var first = panels[0].getAttribute('data-insp');
+      var cards = document.querySelectorAll('.node[data-node]');
+      for (var m = 0; m < cards.length; m++) {
+        cards[m].classList.toggle('is-selected',
+                                  cards[m].getAttribute('data-node') === first);
+      }
+    }
+  }
+
+  function fillInspector(panel, node) {
+    if (!panel || !node) return;
     fillNodeCommon(panel, node);
 
     var disk = panel.querySelector('.mcol.is-disk');
@@ -389,8 +439,6 @@
       }
     }
 
-    clear(host);
-    host.appendChild(panel);
   }
 
   // --- jobs -----------------------------------------------------------------
@@ -535,8 +583,20 @@
     if (!host) return;
     if (!job) {
       showEmpty(host, 'rf-tpl-empty-decision');
+      host.removeAttribute('data-job');
       return;
     }
+
+    // A decision is finished. Its candidates, their terms and their bands were
+    // fixed the moment the router chose, and nothing that arrives later can
+    // change them -- so re-rendering the same job is not just wasted work, it
+    // tears down the bars and builds them again on every poll, restarting the
+    // entrance animation. On screen that reads as a chart that will not sit
+    // still. Only a *different* job in this panel is worth redrawing.
+    //
+    // Same lesson as renderCluster's cards, which carries the same paragraph.
+    if (host.getAttribute('data-job') === job.job_id) return;
+    host.setAttribute('data-job', job.job_id);
 
     var admitted = (job.candidates || []).filter(function (c) { return c.admitted; });
 
@@ -1388,12 +1448,9 @@
   function repaint() {
     renderHeader();
     renderWorldCards();
-    if (document.getElementById('rf-world') &&
-        document.getElementById('rf-tpl-node-inspector')) {
+    if (document.getElementById('rf-world')) {
       renderCluster(state.nodes);
-      renderInspector(state.nodes[0]);
-    } else if (document.getElementById('rf-world')) {
-      renderCluster(state.nodes);
+      renderInspectors(state.nodes);
     }
     if (document.getElementById('rf-feed')) renderJobs(state.jobs);
     if (document.getElementById('rf-tpl-candidate-admitted')) {
