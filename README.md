@@ -86,6 +86,17 @@ routeflow-router --nodes nodes.json --trace trace.jsonl \
 It speaks the OpenAI and Ollama chat APIs, so existing tooling points at it
 unchanged. The operator console is at `http://127.0.0.1:8970`.
 
+Two things are bounded for you, and are worth knowing because their defaults
+decide how the router behaves after a month rather than after an hour. The trace
+rotates at `--trace.max_bytes` (128 MiB), keeping one previous generation, so
+disk use settles at twice that instead of growing forever. A restart replays
+only `--replay.tail_bytes` (16 MiB) of it, because the cost model is a set of
+EWMAs over a twenty-sample half-life and a month of history teaches it nothing a
+few thousand records did not (D43). Set either to 0 for the old unbounded
+behaviour. Nothing in `bench/` is affected — the largest campaign trace on disk
+is 98 KiB against a 128 MiB limit — which matters, because there a trace is a
+measurement, and a measurement that quietly loses its first half is not one.
+
 One caveat worth knowing before you point a client at it. On the OpenAI shape a
 streamed reply carries no token counts unless they are asked for, and the cost
 model cannot learn without them, so the router adds
@@ -196,8 +207,10 @@ goes the wrong way in the two-node run, and that is reported rather than buried.
 
 - `docs/CLUSTER-RESULTS.md` — the same cluster with each node in its own
   container and its own network namespace, so a node can be partitioned, frozen,
-  slowed or killed. Fourteen assertions across five faults. It is where D42 was
-  found, and it is the reason the failure handling is no longer merely written.
+  slowed or killed, and so concurrent requests meet an engine with a queue of
+  its own rather than a modelled one. Fourteen fault assertions and six
+  concurrency ones. It is where D42 and D44 were found, and it is the reason the
+  failure handling and the contention term are no longer merely written.
 
 **What is still not tested: two physical GPUs.** Every heterogeneous result here
 comes from a card paired with a CPU engine, or from two engines sharing one
@@ -212,18 +225,27 @@ rather than built. One published result was retracted outright, and one headline
 figure was cut in half by a later fix — both are still on the page, next to what
 replaced them.
 
-Real hardware found seven defects that five simulated campaigns could not: a 503
+Real hardware found nine defects that five simulated campaigns could not: a 503
 after a load, learning that was inert against a real engine, a preload that was
 really a swap, an uncertainty band covering 7-14% of outcomes where it claimed
 68%, every guard in the benchmark harness reporting success while it printed its
 refusal, a benchmark that threw away what its own agents had learned ten times
-over, and — once the nodes were put behind a real network — a retry that went
-back to the node that had just failed, because an exclusion list was built and
-never handed over. `docs/DECISIONS.md` D36 through D42.
+over, a trace that grew without limit and was replayed in full on every restart,
+and — once the nodes were put behind a real network and given concurrent traffic
+— a retry that went back to the node that had just failed, and a contention
+count taken at a moment when it always read zero, so every contended run was
+taught to the cost model as an uncontended one. `docs/DECISIONS.md` D36 through
+D44.
+
+Two of those nine lived between two components that were each correct on their
+own, and neither is caught by `ctest`: reverting either fix leaves every unit
+check green. They are covered by `bench/real_cluster.sh` instead, and the
+decision entries say which test guards what, because a green suite that does not
+cover the bug is worse than no suite.
 
 That is the honest summary of the project's state: the four phases are closed
-with measured exit criteria, the premise is demonstrated on real engines, on a
-real network and under concurrent load, and **nobody has run it but its
-author**. Every failure mode
-listed above is one a benchmark happened to walk into. The next one will be
-found by whoever points it at traffic that was not designed to test it.
+with measured exit criteria; the premise is demonstrated on real engines, over a
+real network, and under concurrent load; disk use and startup time are bounded;
+and **nobody has run it but its author**. Every failure mode listed above is one
+a benchmark happened to walk into. The next one will be found by whoever points
+it at traffic that was not designed to test it.
