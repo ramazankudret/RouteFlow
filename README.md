@@ -1,3 +1,5 @@
+![RouteFlow — warmth-aware routing for local LLM fleets](docs/banner.svg)
+
 # RouteFlow
 
 A warmth-aware inference scheduler for a small, heterogeneous cluster of local

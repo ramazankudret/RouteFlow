@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 960 200" width="960" height="200" role="img" aria-label="RouteFlow — warmth-aware routing for local LLM fleets">
+  <title>RouteFlow</title>
+  <defs>
+    <filter id="rfs" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="2.4"/></filter>
+    <filter id="rfw" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="rft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter>
+    <radialGradient id="rfa"><stop offset="0" stop-color="#33e07a" stop-opacity=".34"/><stop offset="1" stop-color="#33e07a" stop-opacity="0"/></radialGradient>
+    <radialGradient id="rfv" cx="26%" cy="50%"><stop offset="0" stop-color="#0e1822"/><stop offset="1" stop-color="#05070a"/></radialGradient>
+    <linearGradient id="rfsw" x1="0" x2="1"><stop offset="0" stop-color="#33e07a" stop-opacity="0"/><stop offset=".5" stop-color="#33e07a" stop-opacity=".75"/><stop offset="1" stop-color="#33e07a" stop-opacity="0"/></linearGradient>
+    <clipPath id="rfclip"><rect x="336" y="128" width="404" height="10"/></clipPath>
+    <path id="rfp1" d="M132 100 C 96 100, 88 40, 52 40"/>
+    <path id="rfp2" d="M132 100 C 178 100, 186 34, 232 34"/>
+    <path id="rfp3" d="M132 100 C 178 100, 184 162, 228 162"/>
+    <path id="rfp4" d="M132 100 C 96 100, 84 166, 48 166"/>
+  </defs>
+
+  <rect width="960" height="200" fill="#05070a"/>
+  <rect width="960" height="200" fill="url(#rfv)"/>
+  <rect x="0.5" y="0.5" width="959" height="199" fill="none" stroke="#18202a"/>
+  <g stroke="#212c36" stroke-width="1" fill="none">
+    <path d="M12 22 V12 H22"/><path d="M938 12 H948 V22"/><path d="M12 178 V188 H22"/><path d="M948 178 V188 H938"/>
+  </g>
+  <path d="M296 44 V156" stroke="#141d26" stroke-width="1"/>
+
+  <g fill="none" stroke-linecap="round">
+    <g filter="url(#rfw)" stroke="#33e07a" stroke-width="8">
+      <use xlink:href="#rfp1" href="#rfp1" opacity=".2"><animate attributeName="opacity" values=".1;.28;.1" dur="3.8s" repeatCount="indefinite"/></use>
+      <use xlink:href="#rfp2" href="#rfp2" opacity=".2"><animate attributeName="opacity" values=".1;.28;.1" dur="4.6s" repeatCount="indefinite"/></use>
+      <use xlink:href="#rfp3" href="#rfp3" opacity=".2"><animate attributeName="opacity" values=".1;.28;.1" dur="3.2s" repeatCount="indefinite"/></use>
+    </g>
+    <use xlink:href="#rfp1" href="#rfp1" stroke="#33e07a" stroke-width="2.2"><animate attributeName="opacity" values=".45;1;.45" dur="3.8s" repeatCount="indefinite"/></use>
+    <use xlink:href="#rfp2" href="#rfp2" stroke="#33e07a" stroke-width="1.3"><animate attributeName="opacity" values=".45;1;.45" dur="4.6s" repeatCount="indefinite"/></use>
+    <use xlink:href="#rfp3" href="#rfp3" stroke="#33e07a" stroke-width="2.1"><animate attributeName="opacity" values=".45;1;.45" dur="3.2s" repeatCount="indefinite"/></use>
+    <use xlink:href="#rfp4" href="#rfp4" stroke="#2a3138" stroke-width="1.5" stroke-dasharray="2 7"/>
+  </g>
+
+  <g fill="#8bf3b6" filter="url(#rfs)">
+    <circle r="2.8"><animateMotion dur="3.4s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath xlink:href="#rfp1" href="#rfp1"/></animateMotion></circle>
+    <circle r="2.8"><animateMotion dur="1.5s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath xlink:href="#rfp2" href="#rfp2"/></animateMotion></circle>
+    <circle r="2.8"><animateMotion dur="1.5s" begin="0.75s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath xlink:href="#rfp2" href="#rfp2"/></animateMotion></circle>
+    <circle r="2.8"><animateMotion dur="2.4s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath xlink:href="#rfp3" href="#rfp3"/></animateMotion></circle>
+  </g>
+
+  <circle cx="132" cy="100" r="52" fill="url(#rfa)">
+    <animate attributeName="r" values="46;58;46" dur="5s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".55;1;.55" dur="5s" repeatCount="indefinite"/>
+  </circle>
+  <g fill="none" stroke="#33e07a" stroke-width="1">
+    <circle cx="132" cy="100" r="16" opacity="0">
+      <animate attributeName="r" values="16;54" dur="3.6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;.5;0" keyTimes="0;.12;1" dur="3.6s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="132" cy="100" r="16" opacity="0">
+      <animate attributeName="r" values="16;54" dur="3.6s" begin="1.8s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;.5;0" keyTimes="0;.12;1" dur="3.6s" begin="1.8s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <g fill="none" stroke="#8ef0b6" stroke-width="1.9" stroke-linejoin="round">
+    <rect x="109" y="92" width="46" height="17" rx="8.5"/>
+    <path d="M120 92 L114 75"/>
+    <path d="M144 92 L150 75"/>
+  </g>
+  <g fill="#8ef0b6">
+    <circle cx="120" cy="100.5" r="1.8"><animate attributeName="opacity" values="1;.2;1" dur="1.6s" repeatCount="indefinite"/></circle>
+    <circle cx="132" cy="100.5" r="1.8"><animate attributeName="opacity" values=".2;1;.2" dur="2.1s" repeatCount="indefinite"/></circle>
+    <circle cx="144" cy="100.5" r="1.8"><animate attributeName="opacity" values="1;.3;1" dur="2.7s" repeatCount="indefinite"/></circle>
+  </g>
+
+  <g transform="translate(52 40)">
+    <rect x="-6.4" y="-6" width="12.8" height="18" fill="#33e07a" opacity=".3">
+      <animate attributeName="y" values="-4;-7.5;-4" dur="5.4s" repeatCount="indefinite"/>
+      <animate attributeName="height" values="16;19.5;16" dur="5.4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values=".24;.46;.24" dur="5.4s" repeatCount="indefinite"/>
+    </rect>
+    <g fill="none" stroke="#33e07a" stroke-width="1.6" stroke-linejoin="round">
+      <rect x="-7.5" y="-14" width="15" height="28" rx="1.5"/>
+      <path d="M-3.8 -8.5 H3.8"/><path d="M-3.8 -4.8 H3.8"/>
+    </g>
+  </g>
+
+  <g transform="translate(232 34)">
+    <circle r="22" fill="none" stroke="#c98500" opacity=".4">
+      <animate attributeName="r" values="20;25.5;20" dur="3.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values=".18;.6;.18" dur="3.2s" repeatCount="indefinite"/>
+    </circle>
+    <rect x="-10.4" y="-1" width="20.8" height="9" fill="#33e07a" opacity=".3">
+      <animate attributeName="y" values="0;-2.4;0" dur="5.4s" repeatCount="indefinite"/>
+      <animate attributeName="height" values="8;10.4;8" dur="5.4s" repeatCount="indefinite"/>
+    </rect>
+    <g fill="none" stroke="#33e07a" stroke-width="1.6" stroke-linejoin="round">
+      <rect x="-11.5" y="-7.5" width="23" height="16" rx="1.5"/>
+      <path d="M-6.2 -7.5 V-13"/><path d="M-2 -7.5 V-13"/><path d="M2.2 -7.5 V-13"/><path d="M6.4 -7.5 V-13"/>
+      <rect x="-6.8" y="-3.2" width="7.4" height="7.4"/>
+    </g>
+  </g>
+
+  <g transform="translate(228 162)">
+    <rect x="-10.4" y="1.6" width="20.8" height="4.2" fill="#33e07a" opacity=".3">
+      <animate attributeName="opacity" values=".2;.42;.2" dur="5.4s" repeatCount="indefinite"/>
+    </rect>
+    <g fill="none" stroke="#33e07a" stroke-width="1.6" stroke-linejoin="round">
+      <rect x="-11.5" y="-5.5" width="23" height="11.5" rx="3"/>
+      <path d="M2 0.4 H7.4"/><circle cx="-6.4" cy="0.4" r="1.5"/>
+    </g>
+  </g>
+
+  <g transform="translate(48 166)">
+    <g fill="none" stroke="#39434b" stroke-width="1.6" stroke-linejoin="round">
+      <rect x="-8.5" y="-9.5" width="18" height="13" rx="1"/>
+      <path d="M-12.5 8.5 L13.5 8.5 L9.5 3.5 L-8.5 3.5 Z"/>
+    </g>
+    <circle cx="18" cy="-3" r="1.8" fill="#d95926" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;.2;.9;0;0" keyTimes="0;.42;.46;.52;.58;.7;1" dur="1.7s" calcMode="discrete" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="24" cy="3" r="1.5" fill="#d95926" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;.2;.9;0;0" keyTimes="0;.42;.46;.52;.58;.7;1" dur="1.7s" begin="0.55s" calcMode="discrete" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" letter-spacing="1.3" text-anchor="middle">
+    <text x="52" y="67" fill="#46525c">DESKTOP-01</text>
+    <text x="232" y="69" fill="#46525c">JETSON-01</text>
+    <text x="228" y="181" fill="#46525c">MINI-01</text>
+    <text x="48" y="188" fill="#333c44">LAPTOP-01</text>
+  </g>
+  <text x="336" y="112" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="58" font-weight="600" letter-spacing="4" fill="#33e07a" opacity=".5" filter="url(#rft)"><tspan fill-opacity="0">Route</tspan>Flow</text>
+  <text x="336" y="112" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="58" font-weight="600" letter-spacing="4" fill="#e6efe9">Route<tspan fill="#33e07a">Flow</tspan></text>
+
+  <rect x="336" y="132" width="404" height="1" fill="#1b242e"/>
+  <g clip-path="url(#rfclip)">
+    <rect y="131" width="150" height="3" fill="url(#rfsw)">
+      <animate attributeName="x" values="186;740;740" keyTimes="0;.42;1" dur="6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;.06;.34;.42;1" dur="6s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <circle cx="341" cy="155" r="3" fill="#33e07a">
+    <animate attributeName="opacity" values="1;.25;1" dur="2.2s" repeatCount="indefinite"/>
+  </circle>
+  <text x="354" y="159" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" letter-spacing="3.6" fill="#5b6971">WARMTH-AWARE ROUTING FOR LOCAL LLM FLEETS</text>
+</svg>
