@@ -19,6 +19,23 @@ whole project.
 
 C++17, no third-party libraries. JSON, HTTP/1.1 and SSE are in `common/`.
 
+## The console
+
+Four screens over one trace: the cluster and what each node is holding, the jobs
+as they arrive, why a given job went where it did, and how far the predictions
+landed from the truth.
+
+https://github.com/user-attachments/assets/4464ff05-2a0d-4c28-b8b4-34409af25889
+
+The one worth pausing on is **decision**. It will tell you that a choice was
+inside its own uncertainty — `within_noise` — rather than dressing a coin flip
+up as a considered ranking. Bring it up on your own cluster with:
+
+```bash
+bench/console.sh          # three simulated nodes, a warm cost model, some traffic
+bench/console.sh --stop
+```
+
 ## Is this for you
 
 It helps if all of these are true:
@@ -119,6 +136,9 @@ routeflow-agent --simulate bench/profiles/sim-desktop.json --http.port 8981 --no
 routeflow-agent --simulate bench/profiles/sim-jetson.json  --http.port 8982 --node.id sim-jetson
 routeflow-agent --simulate bench/profiles/sim-laptop.json  --http.port 8983 --node.id sim-laptop
 ```
+
+`bench/console.sh` does all three plus a router and some traffic, if what you
+want is the console rather than the pieces.
 
 ## Measure
 
