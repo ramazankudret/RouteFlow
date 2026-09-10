@@ -271,3 +271,7 @@ real network, and under concurrent load; disk use and startup time are bounded;
 and **nobody has run it but its author**. Every failure mode listed above is one
 a benchmark happened to walk into. The next one will be found by whoever points
 it at traffic that was not designed to test it.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
