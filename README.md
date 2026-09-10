@@ -56,7 +56,8 @@ routes to the engines you already run, speaking their APIs.
 
 ## Build
 
-Needs CMake ≥ 3.16 and a C++17 compiler. Developed on WSL Ubuntu with g++ 13.
+Needs CMake ≥ 3.16 and a C++17 compiler, and nothing else — there are no
+third-party dependencies to fetch. Developed on WSL Ubuntu with g++ 13.
 
 ```bash
 cmake -S . -B build
@@ -64,6 +65,35 @@ cmake --build build -j4
 ```
 
 Produces `routeflow-agent` and `routeflow-router`.
+
+### Or a container
+
+```bash
+docker build -t routeflow .
+```
+
+One image, both binaries; which you get is the command you pass. The build stage
+runs the three test suites, so an image that compiles but does not work cannot
+be produced quietly. About 150 MB, and it runs as an unprivileged user.
+
+```bash
+# on each machine that has an engine
+docker run -d --name routeflow-agent --network host routeflow \
+    routeflow-agent --node.id desktop --engine.endpoint 127.0.0.1:11434 \
+                    --http.bind 0.0.0.0 --http.token SECRET
+
+# once, for the cluster
+docker run -d --name routeflow-router -p 8970:8970 \
+    -v /etc/routeflow/nodes.json:/etc/routeflow/nodes.json:ro routeflow \
+    routeflow-router --nodes /etc/routeflow/nodes.json \
+                     --ui.dir /usr/local/share/routeflow/ui \
+                     --http.bind 0.0.0.0 --http.token CLIENT_SECRET \
+                     --node.token SECRET
+```
+
+`--ui.dir` is needed because the console lives at an absolute path in the image
+rather than beside the working directory. The config layer reads flags and files
+only, never the environment, so it has to be a flag.
 
 ## Test
 
@@ -239,6 +269,17 @@ comes from a card paired with a CPU engine, or from two engines sharing one
 card. The mechanism does not depend on that, but the seconds do, and so does one
 conclusion — `docs/TTFT-DECISION.md` measures both ratios precisely because its
 answer turns on which shape you have.
+
+That one needs hardware, not work. If you have two machines with a GPU each,
+start an agent on both and point the campaign at them; the harness no longer
+insists on building its own cluster on localhost:
+
+```bash
+bench/real_two_node.sh --nodes two-gpus.json --runs 5 --rounds 8
+```
+
+`docs/REAL-TWO-NODE-RESULTS.md` has the full procedure and says which number to
+look at.
 
 The reports say what did not work as plainly as what did. Phase 3 failed its
 exit criterion on saturated traffic and met it once the workload left gaps, and

@@ -1,0 +1,7 @@
+# The build stage copies only sources; this keeps the context small and stops a
+# local build tree or a campaign's traces from being sent to the daemon.
+.git
+build/
+bench/results-*/
+docs/
+*.md

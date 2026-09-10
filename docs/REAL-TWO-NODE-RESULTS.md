@@ -120,6 +120,30 @@ sum, not by dominating it.
   work slows the GPU node's host side. A real two-machine cluster does not have
   that coupling, and it is the reason this is a substitute for a second GPU
   rather than a replacement.
+
+  **This is the one open question in the repository, and it needs hardware
+  rather than work.** Every heterogeneous result here comes from a card paired
+  with a CPU engine, or from two engines sharing one card, because that is what
+  the machine has. What it would take to close it, on two boxes that each have
+  a GPU:
+
+  ```bash
+  # on each machine, beside its engine
+  routeflow-agent --node.id gpu-a --engine.endpoint 127.0.0.1:11434 \
+                  --http.bind 0.0.0.0 --http.token SECRET
+
+  # from anywhere that can reach both
+  cat > two-gpus.json <<'JSON'
+  { "nodes": [ { "id": "gpu-a", "endpoint": "10.0.0.11:8971" },
+               { "id": "gpu-b", "endpoint": "10.0.0.12:8971" } ] }
+  JSON
+  bench/real_two_node.sh --nodes two-gpus.json --runs 5 --rounds 8
+  ```
+
+  The interesting number is the decode ratio between the two nodes. Everything
+  on this page was measured at roughly 10x, and `docs/TTFT-DECISION.md` measured
+  the other end at 1.008 by putting two engines on the same card. A real pair
+  sits somewhere between, and that is the point on the curve nobody has.
 - **The baseline was lucky.** RoundRobin's zero evictions come from the node
   count and model count both being two and both alternating. Three models, or a
   random order, and it would thrash. That makes this workload *favourable* to

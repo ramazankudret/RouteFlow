@@ -40,14 +40,27 @@ GPU_AGENT=8991
 CPU_AGENT=8992
 ROUTER_PORT=8990
 
+# --nodes points the campaign at a cluster that is already running: agents you
+# started yourself, on whatever machines you have. That is the one way the open
+# question in docs/REAL-TWO-NODE-RESULTS.md gets answered -- every result here
+# comes from a card paired with a CPU engine, and nobody has run it against two
+# real GPUs because this box has one.
+NODES_FILE=""
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --runs)   RUNS="$2"; shift 2 ;;
     --rounds) ROUNDS="$2"; shift 2 ;;
     --bin)    BIN="$2"; shift 2 ;;
+    --nodes)  NODES_FILE="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+if [[ -n "${NODES_FILE}" && ! -r "${NODES_FILE}" ]]; then
+  echo "cannot read ${NODES_FILE}" >&2
+  exit 2
+fi
 
 mkdir -p "${OUT}"
 # The router is what is under test, so it is restarted for every run. The
@@ -71,16 +84,28 @@ cleanup() { pkill -f '[r]outeflow-router' 2>/dev/null || true; }
 trap 'rc=$?; cleanup_all; exit ${rc}' EXIT
 cleanup_all; sleep 1
 
-for e in "${GPU_ENGINE}" "${CPU_ENGINE}"; do
-  curl -s -m 5 "http://${e}/api/tags" >/dev/null || { echo "engine ${e} unreachable"; exit 1; }
-done
+if [[ -z "${NODES_FILE}" ]]; then
+  for e in "${GPU_ENGINE}" "${CPU_ENGINE}"; do
+    curl -s -m 5 "http://${e}/api/tags" >/dev/null || { echo "engine ${e} unreachable"; exit 1; }
+  done
+fi
 
-cat > "${OUT}/nodes.json" <<JSON
+if [[ -n "${NODES_FILE}" ]]; then
+  cp "${NODES_FILE}" "${OUT}/nodes.json"
+  echo "using the cluster described by ${NODES_FILE}:"
+  python3 -c "
+import json, sys
+for n in json.load(open(sys.argv[1]))['nodes']:
+    print('  %-12s %s' % (n['id'], n['endpoint']))
+" "${OUT}/nodes.json"
+else
+  cat > "${OUT}/nodes.json" <<JSON
 { "nodes": [
     { "id": "gpu", "endpoint": "127.0.0.1:${GPU_AGENT}" },
     { "id": "cpu", "endpoint": "127.0.0.1:${CPU_AGENT}" }
 ] }
 JSON
+fi
 
 # The workload. Two models so that MAX_LOADED_MODELS=1 forces real evictions,
 # and output lengths spanning the crossover so the right answer changes from
@@ -121,6 +146,9 @@ print("WALL %.3f ok %d failed %d" % (wall, ok, failed))
 PY
 
 start_agents() {
+  # Somebody else's cluster: they started the agents, and this campaign has no
+  # business managing them.
+  [[ -n "${NODES_FILE}" ]] && return 0
   pgrep -f '[r]outeflow-agent' >/dev/null && return 0   # already watching
   # The GPU node reads NVML. The CPU node has no VRAM to report, so it says so
   # rather than borrowing the card's numbers -- admission then treats the engine
