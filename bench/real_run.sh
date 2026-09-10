@@ -11,7 +11,7 @@
 # Deliberately light on the card. qwen2.5:7b is 4.9 GB resident on an 8 GB GPU,
 # outputs are short, and requests are serial.
 set -uo pipefail
-cd /mnt/c/Users/erama/OneDrive/Desktop/RouteFlow
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 BIN="$HOME/rf-build"
 OUT=bench/results-real
 MODEL="qwen2.5:7b-instruct-q4_K_M"
